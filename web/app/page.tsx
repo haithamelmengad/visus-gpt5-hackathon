@@ -75,25 +75,29 @@ export default function Home() {
       )}
 
       <ul style={{ listStyle: "none", padding: 0 }}>
-        {items.map((item) => (
-          <li key={`${item.track.id}-${item.played_at}`} style={{ display: "flex", gap: 12, marginBottom: 12 }}>
-            {/* cover art */}
-            <img
-              src={item.track.album.images?.[2]?.url || item.track.album.images?.[0]?.url || "/vercel.svg"}
-              alt={item.track.name}
-              width={48}
-              height={48}
-              style={{ borderRadius: 4, objectFit: "cover" }}
-            />
-            <div>
-              <div style={{ fontWeight: 600 }}>{item.track.name}</div>
-              <div style={{ color: "#666" }}>
-                {item.track.artists.map((a) => a.name).join(", ")} – {item.track.album.name}
-              </div>
-              <div style={{ fontSize: 12, color: "#888" }}>Played at {new Date(item.played_at).toLocaleString()}</div>
-            </div>
-          </li>
-        ))}
+        {items.map((item) => {
+          const href = `/track/${encodeURIComponent(item.track.id)}?title=${encodeURIComponent(item.track.name)}`;
+          return (
+            <li key={`${item.track.id}-${item.played_at}`} style={{ marginBottom: 12 }}>
+              <a href={href} style={{ display: "flex", gap: 12, alignItems: "center", textDecoration: "none", color: "inherit" }}>
+                <img
+                  src={item.track.album.images?.[2]?.url || item.track.album.images?.[0]?.url || "/vercel.svg"}
+                  alt={item.track.name}
+                  width={48}
+                  height={48}
+                  style={{ borderRadius: 4, objectFit: "cover" }}
+                />
+                <div>
+                  <div style={{ fontWeight: 600 }}>{item.track.name}</div>
+                  <div style={{ color: "#666" }}>
+                    {item.track.artists.map((a) => a.name).join(", ")} – {item.track.album.name}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#888" }}>Played at {new Date(item.played_at).toLocaleString()}</div>
+                </div>
+              </a>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
