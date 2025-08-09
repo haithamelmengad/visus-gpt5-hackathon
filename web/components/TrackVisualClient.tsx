@@ -18,7 +18,7 @@ export default function TrackVisualClient(props: Props) {
   return (
     <div>
       <TrackPlayer {...props} onLevelChange={setLevel} onPlayingChange={setIsPlaying} />
-      <ThreeScene level={level} isPlaying={isPlaying} />
+      <ThreeScene level={level} isPlaying={isPlaying} seed={`${props.title} ${props.artistNames}`} />
     </div>
   );
 }
