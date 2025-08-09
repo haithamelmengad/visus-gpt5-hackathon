@@ -45,6 +45,13 @@ export default function TrackVisualClient(props: Props) {
     color: "#eaeaea",
   };
 
+  const footerStyle: React.CSSProperties = {
+    textAlign: "center",
+    marginTop: 34,
+    color: "#9aa0a6",
+    fontSize: 12,
+  };
+
   return (
     <div style={gradientBg}>
       <div style={centerWrap}>
@@ -53,6 +60,7 @@ export default function TrackVisualClient(props: Props) {
       <div style={playerCardStyle}>
         <TrackPlayer {...props} onLevelChange={setLevel} onPlayingChange={setIsPlaying} />
       </div>
+      <div style={footerStyle}>[ stems labs ]</div>
     </div>
   );
 }

@@ -205,7 +205,9 @@ export default function TrackPlayer({ title, artistNames, albumImageUrl, preview
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button onClick={() => window.history.back()} aria-label="Back" style={controlPillBase}>↩</button>
+          <button onClick={() => window.history.back()} aria-label="Back" style={controlPillBase}>
+            <span style={{ display: "inline-block", fontSize: 18 }}>↩</span>
+          </button>
           {previewUrl ? (
             audioRef.current && !audioRef.current.paused ? (
               <button onClick={handlePause} aria-label="Pause" style={controlPillBase}>❚❚</button>
