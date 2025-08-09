@@ -128,152 +128,134 @@ export default function ThreeScene({ level = 0, isPlaying = false, seed = "" }: 
     const material = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.3 });
 
     const lower = (seed || "").toLowerCase();
-    const hasTrap = lower.includes("trap");
-    const hasQueen = lower.includes("queen");
 
-    // Procedural model informed by imagery keywords
-    const buildFromKeywords = () => {
+    // Dynamic seed-driven generator (no hardcoded keywords)
+    const buildProceduralSculpt = () => {
       const group = new THREE.Group();
-      // Trap ring (bear trap)
-      if (hasTrap) {
-        const ringMat = new THREE.MeshStandardMaterial({ color: 0x9999aa, metalness: 0.7, roughness: 0.3 });
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.06, 24, 180), ringMat);
-        group.add(ring);
-        // Teeth
-        const teethMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.2, roughness: 0.5 });
-        const toothGeo = new THREE.ConeGeometry(0.08, 0.22, 8);
-        const teeth = lower.includes("queen") ? 24 : 18;
-        for (let i = 0; i < teeth; i++) {
-          const a = (i / teeth) * Math.PI * 2;
-          const x = Math.cos(a) * 0.94;
-          const y = Math.sin(a) * 0.94;
-          const tooth = new THREE.Mesh(toothGeo, teethMat);
-          tooth.position.set(x, y, 0);
-          tooth.lookAt(0, 0, 0);
-          group.add(tooth);
-        }
-      }
-      // Crown
-      if (hasQueen) {
-        const gold = new THREE.MeshStandardMaterial({ color: 0xdaa520, metalness: 0.8, roughness: 0.25 });
-        const band = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.05, 16, 120), gold);
-        band.position.z = 0.1;
-        band.rotation.x = Math.PI / 2;
-        group.add(band);
 
-        const spikeGeo = new THREE.ConeGeometry(0.09, 0.35, 12);
-        const spikes = 8;
-        for (let i = 0; i < spikes; i++) {
-          const a = (i / spikes) * Math.PI * 2;
-          const x = Math.cos(a) * 0.6;
-          const z = Math.sin(a) * 0.6;
-          const spike = new THREE.Mesh(spikeGeo, gold);
-          spike.position.set(x, 0.0, z);
-          spike.rotation.x = -Math.PI / 2;
-          spike.lookAt(x, 1, z);
+      // Helper: fit model into view and center it
+      const fitAndCenter = (obj: THREE.Object3D) => {
+        const box = new THREE.Box3().setFromObject(obj);
+        const size = new THREE.Vector3();
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+        box.getSize(size);
+        obj.position.sub(center);
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const desired = 1.6;
+        const scale = maxDim > 0 ? desired / maxDim : 1;
+        obj.scale.multiplyScalar(scale);
+      };
+
+      // Derive statistical features from the seed
+      const words = lower.trim().split(/\s+/).filter(Boolean);
+      const seedLength = lower.length;
+      const wordCount = Math.max(1, words.length);
+      const uniqueChars = new Set(lower.replace(/\s+/g, "").split("")).size;
+      const vowelCount = (lower.match(/[aeiou]/g) || []).length;
+      const digitCount = (lower.match(/\d/g) || []).length;
+      const specialCount = (lower.match(/[^\w\s]/g) || []).length;
+      const vowelRatio = seedLength > 0 ? vowelCount / seedLength : 0.3;
+      const uniqueness = seedLength > 0 ? uniqueChars / Math.min(26, seedLength) : 0.5;
+
+      // Small PRNG for repeatable variation beyond bit shifts
+      let s = h >>> 0;
+      const rndUnit = () => {
+        s = (s * 1664525 + 1013904223) >>> 0; // LCG
+        return s / 0xffffffff;
+      };
+      const rndRange = (min: number, max: number) => min + rndUnit() * (max - min);
+
+      // Base profile: superformula with parameters informed by text features
+      const a = 1, b = 1;
+      const m = Math.max(3, Math.round(3 + uniqueness * 9));
+      const n1 = 0.3 + vowelRatio * 1.7;
+      const n2 = 0.3 + rndRange(0.3, 1.8);
+      const n3 = 0.3 + rndRange(0.3, 1.8);
+      const superformula = (phi: number) => {
+        const c1 = Math.pow(Math.abs(Math.cos((m * phi) / 4) / a), n2);
+        const c2 = Math.pow(Math.abs(Math.sin((m * phi) / 4) / b), n3);
+        return Math.pow(c1 + c2, -1 / n1);
+      };
+
+      // Build a lathe from a modulated profile; ripples driven by word count and digits
+      const points: THREE.Vector2[] = [];
+      const steps = 160;
+      const rippleCount = Math.max(1, Math.min(20, wordCount + digitCount));
+      const twistAmount = (specialCount * 0.15) + rndRange(0, 0.15);
+      for (let i = 0; i <= steps; i++) {
+        const t = (i / steps) * Math.PI;
+        const r = superformula(t);
+        const ripple = 0.06 * Math.sin((i / steps) * rippleCount * Math.PI * 2);
+        const x = Math.max(0.01, r * 0.9 + ripple);
+        const y = (i / steps) * 1.6 - 0.8;
+        points.push(new THREE.Vector2(x, y));
+      }
+      const bodyGeom = new THREE.LatheGeometry(points, 256);
+
+      // Apply a gentle vertical twist based on special character count
+      const pos = bodyGeom.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i++) {
+        const vx = pos.getX(i);
+        const vy = pos.getY(i);
+        const vz = pos.getZ(i);
+        const angle = vy * twistAmount;
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        const rx = vx * cos - vz * sin;
+        const rz = vx * sin + vz * cos;
+        pos.setX(i, rx);
+        pos.setZ(i, rz);
+      }
+      bodyGeom.computeVertexNormals();
+      const body = new THREE.Mesh(bodyGeom, material);
+      group.add(body);
+
+      // Add ring accents based on word count
+      const ringCount = Math.min(6, Math.max(0, wordCount - 1));
+      for (let i = 0; i < ringCount; i++) {
+        const t = -0.6 + (i + 1) * (1.2 / (ringCount + 1));
+        const radius = 0.55 + rndRange(-0.08, 0.12);
+        const tube = 0.02 + 0.02 * rndUnit();
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 16, 120), material);
+        ring.rotation.x = Math.PI / 2;
+        ring.position.y = t;
+        group.add(ring);
+      }
+
+      // Add spikes influenced by consonant dominance
+      const consonantRatio = seedLength > 0 ? (seedLength - vowelCount) / seedLength : 0.7;
+      const spikeBands = Math.round(consonantRatio * 2);
+      const spikesPerBand = Math.round(8 + uniqueness * 12);
+      for (let bnd = 0; bnd < spikeBands; bnd++) {
+        const y = -0.3 + bnd * 0.3;
+        const spikeGeo = new THREE.ConeGeometry(0.05 + 0.03 * rndUnit(), 0.18 + 0.12 * rndUnit(), 10);
+        for (let i = 0; i < spikesPerBand; i++) {
+          const a2 = (i / spikesPerBand) * Math.PI * 2;
+          const r2 = 0.6 + 0.1 * rndUnit();
+          const spike = new THREE.Mesh(spikeGeo, material);
+          spike.position.set(Math.cos(a2) * r2, y, Math.sin(a2) * r2);
+          spike.lookAt(0, y, 0);
           group.add(spike);
         }
-        // Jewel
-        const jewel = new THREE.Mesh(new THREE.OctahedronGeometry(0.12), new THREE.MeshStandardMaterial({ color: 0x8a2be2, emissive: 0x220044 }));
-        jewel.position.set(0, 0.25, 0.0);
-        group.add(jewel);
       }
 
-      // Butterfly
-      if (lower.includes("butterfly")) {
-        const wingMat = new THREE.MeshStandardMaterial({ color: 0x8a2be2, metalness: 0.2, roughness: 0.5, transparent: true, opacity: 0.85 });
-        const makeWing = (sign: number) => {
-          const s = new THREE.Shape();
-          s.moveTo(0, 0);
-          s.bezierCurveTo(0.4, 0.2, 0.9, 0.5, 1.0, 1.1);
-          s.bezierCurveTo(0.9, 1.6, 0.4, 1.8, 0.1, 1.2);
-          s.bezierCurveTo(0.0, 0.9, 0.1, 0.4, 0, 0);
-          const g = new THREE.ShapeGeometry(s, 48);
-          g.rotateZ(sign < 0 ? Math.PI : 0);
-          const m = new THREE.Mesh(g, wingMat);
-          m.scale.set(sign, 1, 1);
-          m.position.set(0.15 * sign, 0.1, 0);
-          return m;
-        };
-        const left = makeWing(-1);
-        const right = makeWing(1);
-        const body = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 1.2, 12), new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.1 }));
-        body.rotation.z = Math.PI / 2;
-        body.position.set(0, 0.6, 0);
-        group.add(left, right, body);
-
-        // Spiral trail for "effect"
-        if (lower.includes("effect")) {
-          const pts: THREE.Vector3[] = [];
-          const turns = 3;
-          for (let i = 0; i < 200; i++) {
-            const t = (i / 200) * turns * Math.PI * 2;
-            const r = 0.2 + i * 0.0025;
-            pts.push(new THREE.Vector3(Math.cos(t) * r, -0.2 + i * 0.004, Math.sin(t) * r));
-          }
-          const curve = new THREE.CatmullRomCurve3(pts);
-          const tube = new THREE.TubeGeometry(curve, 200, 0.01, 8, false);
-          const trail = new THREE.Mesh(tube, new THREE.MeshStandardMaterial({ color: 0x8a2be2, emissive: 0x220044 }));
-          group.add(trail);
-        }
+      // Sprinkle small gems/particles based on special characters
+      const gems = Math.min(80, 10 + specialCount * 14);
+      const gemMat = new THREE.MeshStandardMaterial({ color: color.clone().offsetHSL(0.05, 0, 0).getHex(), emissive: new THREE.Color(color).multiplyScalar(0.15) });
+      for (let i = 0; i < gems; i++) {
+        const r = 0.04 + 0.02 * rndUnit();
+        const gem = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 0), gemMat);
+        const th = rndUnit() * Math.PI * 2;
+        const ph = (rndUnit() - 0.5) * Math.PI * 0.8;
+        const R = 0.9 + 0.4 * rndUnit();
+        gem.position.set(Math.cos(th) * Math.cos(ph) * R, Math.sin(ph) * R * 0.6, Math.sin(th) * Math.cos(ph) * R);
+        group.add(gem);
       }
 
-      // Heart
-      if (/(love|heart)/.test(lower)) {
-        const x = 0, y = 0;
-        const heartShape = new THREE.Shape();
-        heartShape.moveTo(x + 0, y + 0.5);
-        heartShape.bezierCurveTo(x + 0, y + 0.8, x - 0.6, y + 0.8, x - 0.6, y + 0.5);
-        heartShape.bezierCurveTo(x - 0.6, y + 0.2, x - 0.2, y + 0.1, x + 0, y - 0.1);
-        heartShape.bezierCurveTo(x + 0.2, y + 0.1, x + 0.6, y + 0.2, x + 0.6, y + 0.5);
-        heartShape.bezierCurveTo(x + 0.6, y + 0.8, x + 0, y + 0.8, x + 0, y + 0.5);
-        const geo = new THREE.ExtrudeGeometry(heartShape, { depth: 0.2, bevelEnabled: true, bevelThickness: 0.02, bevelSize: 0.04, bevelSegments: 2 });
-        const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xff2d55, metalness: 0.1, roughness: 0.6 }));
-        mesh.rotation.x = -Math.PI / 2;
-        group.add(mesh);
-      }
-
-      if (group.children.length > 0) {
-        scene.add(group);
-        meshRef.current = group;
-        return true;
-      }
-      return false;
-    };
-
-    // Default: generate a unique seed-based sculpture using a superformula lathe profile
-    const buildDefaultSculpt = () => {
-      const h0 = h;
-      const rnd = (k: number, min: number, max: number) => min + ((h0 >> k) % 1000) / 1000 * (max - min);
-      // Superformula parameters (2D)
-      const a = 1;
-      const b = 1;
-      const m = Math.floor(rnd(2, 3, 12));
-      const n1 = rnd(4, 0.2, 1.8);
-      const n2 = rnd(6, 0.2, 1.8);
-      const n3 = rnd(8, 0.2, 1.8);
-      const superformula = (phi: number) => {
-        const c1 = Math.pow(Math.abs(Math.cos(m * phi / 4) / a), n2);
-        const c2 = Math.pow(Math.abs(Math.sin(m * phi / 4) / b), n3);
-        const r = Math.pow(c1 + c2, -1 / n1);
-        return r;
-      };
-      const points: THREE.Vector2[] = [];
-      const steps = 128;
-      for (let i = 0; i <= steps; i++) {
-        const t = (i / steps) * Math.PI; // 0..PI upper half profile
-        const r = superformula(t);
-        const x = r * 0.9 + 0.05 * Math.sin(i * 0.3);
-        const y = (i / steps) * 1.6 - 0.8;
-        points.push(new THREE.Vector2(Math.max(0.01, x), y));
-      }
-      const geom = new THREE.LatheGeometry(points, 256);
-      geom.computeVertexNormals();
-      const mesh = new THREE.Mesh(geom, material);
-      mesh.castShadow = false;
-      mesh.receiveShadow = false;
-      scene.add(mesh);
-      meshRef.current = mesh;
+      fitAndCenter(group);
+      scene.add(group);
+      meshRef.current = group;
       return true;
     };
 
@@ -332,10 +314,8 @@ export default function ThreeScene({ level = 0, isPlaying = false, seed = "" }: 
       }
     };
 
-    if (!buildFromKeywords()) {
-      if (!buildDefaultSculpt()) {
-        void buildText();
-      }
+    if (!buildProceduralSculpt()) {
+      void buildText();
     }
   }, [seed]);
 
