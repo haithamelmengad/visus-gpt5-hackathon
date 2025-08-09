@@ -10,9 +10,10 @@ type Props = {
   spotifyUrl?: string;
   onLevelChange?: (level01: number) => void;
   onPlayingChange?: (isPlaying: boolean) => void;
+  onAnalyserReady?: (analyser: AnalyserNode) => void;
 };
 
-export default function TrackPlayer({ title, artistNames, albumImageUrl, previewUrl, spotifyUrl, onLevelChange, onPlayingChange }: Props) {
+export default function TrackPlayer({ title, artistNames, albumImageUrl, previewUrl, spotifyUrl, onLevelChange, onPlayingChange, onAnalyserReady }: Props) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [autoplayError, setAutoplayError] = useState<string | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -39,6 +40,11 @@ export default function TrackPlayer({ title, artistNames, albumImageUrl, preview
       analyser.connect(ctx.destination);
       analyserRef.current = analyser;
       dataRef.current = new Uint8Array(analyser.frequencyBinCount);
+
+      // Surface analyser to parent for advanced visualizers (FFT-based)
+      try {
+        onAnalyserReady?.(analyser);
+      } catch {}
 
       const tick = () => {
         const analyserNode = analyserRef.current;

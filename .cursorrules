@@ -1,53 +1,38 @@
-Project: Visus (Next.js + Three.js)
+### Agent Rules for Visus (Next.js + Three.js)
 
-Purpose
-- Build a Spotify-powered 3D, audio–reactive visualizer.
-- Core app located in `web/` (Next.js App Router, TypeScript).
+- Default to development mode for all runs. Do not build for production unless the user explicitly asks to "build for prod".
 
-Primary Files
-- `web/components/ThreeScene.tsx`: 3D scene setup, animation loop, seed-driven geometry.
-- `web/components/TrackPlayer.tsx`: audio preview + level metering; drives `level` and `isPlaying` props.
-- `web/components/TrackVisualClient.tsx`: composes player and scene; passes seed from track title/artist.
-- `web/app/**`: pages and API routes (e.g., NextAuth + Spotify).
+- When starting the app:
 
-Runbook (Non-interactive)
-- cd `web`
-- Ensure `.env.local` exists with keys: `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL=http://localhost:3000`.
-- Install deps: `npm ci || npm install`
-- Dev server: `npm run dev`
-- Health check: `GET http://localhost:3000` should return 200.
+  - Use the following non-interactive runbook:
+    1. `cd web`
+    2. Ensure `.env.local` exists with keys: `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL=http://localhost:3000`
+    3. `npm ci || npm install`
+    4. `npm run dev` (Webpack dev server with Fast Refresh/hot reload)
+       - Optional: `npm run dev:turbo` to use Turbopack
+  - Treat long-running servers as background jobs.
+  - Health check: `GET http://localhost:3000` should return 200.
 
-Engineering Rules
-- Performance: keep geometries moderately low poly; prefer `BufferGeometry`; dispose `geometry`/`material` on teardown; keep animation in a single rAF loop using refs.
-- Determinism: any seed → deterministic visual (use stable PRNG, do not rely on `Math.random()` without seeding).
-- No text models: do not render text meshes to represent the seed; use geometry that visually encodes/evokes the words.
-- Avoid hardcoded keyword lists where possible. If semantic matching is required, prefer fuzzy matching with small canonical sets and keep it data-driven.
-- Accessibility/UX: maintain smooth 60fps where possible; avoid blocking main thread; keep canvas background dark; respect play/pause.
-- Security: never commit secrets; use `.env.local`. Do not log access tokens.
-- Types: use TypeScript types; avoid `any` in new code; keep names descriptive.
-- Formatting: match existing style; no inline narration comments; add brief comments only where logic is non-obvious.
+  - Hot reload expectations:
+    - Dev uses Webpack Fast Refresh by default (`NEXT_DISABLE_TURBOPACK=1` is set in the dev script) for reliable hot reload.
+    - The dev server is configured with file watcher polling to improve change detection across filesystems.
+    - Always run commands from the `web/` directory (`/Users/haithamelmengad/Code/visus-gpt5-hackathon/web`). Running from the repo root will fail with npm ENOENT (missing `package.json`).
 
-When Editing 3D Code
-- Keep camera/light setup minimal; avoid global state.
-- Fit models into view and center them after construction.
-- For audio reactivity: map `level` ∈ [0,1] to scale/rotation subtly; avoid abrupt jumps (use easing).
-- Always dispose geometries/materials in cleanup and when replacing meshes.
+- Never run production build commands by default:
 
-NextAuth / Spotify
-- OAuth redirect must be `http://localhost:3000/api/auth/callback/spotify`.
-- JWT strategy with token refresh in `web/lib/auth.ts`; do not break callbacks.
+  - Do NOT run `npm run build`, `next build`, or `next start` unless the user explicitly instructs to build for prod.
+  - If explicitly asked to build for prod:
+    1. `cd web`
+    2. `npm ci || npm install`
+    3. `npm run build`
+    4. `npm start`
 
-File Ownership
-- Safe to modify: `web/components/*`, `web/app/**/*.tsx`, `web/app/api/**`, `web/globals.css`.
-- Be cautious: `web/lib/auth.ts`, `web/next.config.ts`, `web/tsconfig.json` (update only when required).
+- Operational guidelines:
 
-Commit Guidance
-- Write descriptive commit messages in imperative mood (e.g., "Implement seed-driven semantic butterfly shape").
-- Keep edits scoped; avoid unrelated formatting.
+  - Prefer absolute paths when invoking tools/commands.
+  - Use non-interactive flags where applicable.
+  - Do not log or print secrets; rely on `.env.local`.
 
-Assistant Output Style
-- Default to concise responses. Use code fences only for changed snippets or commands.
-- Always refer to files with backticks, e.g., `web/components/ThreeScene.tsx`.
-- Prefer absolute paths when invoking tools.
-
-
+- Context reminders:
+  - Core app is in `web/` (Next.js App Router, TypeScript).
+  - Keep performance reasonable; use the existing runbook unless told otherwise.
