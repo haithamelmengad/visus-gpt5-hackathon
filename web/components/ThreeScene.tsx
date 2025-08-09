@@ -7,7 +7,11 @@ import { TextGeometry } from "three/examples/jsm/geometries/TextGeometry.js";
 
 type Props = { level?: number; isPlaying?: boolean; seed?: string };
 
-export default function ThreeScene({ level = 0, isPlaying = false, seed = "" }: Props) {
+export default function ThreeScene({
+  level = 0,
+  isPlaying = false,
+  seed = "",
+}: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const levelRef = useRef<number>(0);
@@ -85,7 +89,8 @@ export default function ThreeScene({ level = 0, isPlaying = false, seed = "" }: 
           const m = child as any;
           if (m.geometry) m.geometry.dispose?.();
           if (m.material) {
-            if (Array.isArray(m.material)) m.material.forEach((mat: THREE.Material) => mat.dispose());
+            if (Array.isArray(m.material))
+              m.material.forEach((mat: THREE.Material) => mat.dispose());
             else (m.material as THREE.Material).dispose?.();
           }
         });
@@ -106,7 +111,8 @@ export default function ThreeScene({ level = 0, isPlaying = false, seed = "" }: 
         const m = child as any;
         if (m.geometry) m.geometry.dispose?.();
         if (m.material) {
-          if (Array.isArray(m.material)) m.material.forEach((mat: THREE.Material) => mat.dispose());
+          if (Array.isArray(m.material))
+            m.material.forEach((mat: THREE.Material) => mat.dispose());
           else (m.material as THREE.Material).dispose?.();
         }
       });
@@ -123,11 +129,16 @@ export default function ThreeScene({ level = 0, isPlaying = false, seed = "" }: 
       return h >>> 0;
     };
     const h = hash(seed || "model");
-    const pick = (min: number, max: number, k: number) => min + ((h >> k) % 1000) / 1000 * (max - min);
+    const pick = (min: number, max: number, k: number) =>
+      min + (((h >> k) % 1000) / 1000) * (max - min);
     const variant = h % 4;
 
     const color = new THREE.Color().setHSL(((h >> 8) % 360) / 360, 0.6, 0.55);
-    const material = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.3 });
+    const material = new THREE.MeshStandardMaterial({
+      color,
+      roughness: 0.35,
+      metalness: 0.3,
+    });
 
     const lower = (seed || "").toLowerCase();
 
@@ -158,7 +169,8 @@ export default function ThreeScene({ level = 0, isPlaying = false, seed = "" }: 
       const digitCount = (lower.match(/\d/g) || []).length;
       const specialCount = (lower.match(/[^\w\s]/g) || []).length;
       const vowelRatio = seedLength > 0 ? vowelCount / seedLength : 0.3;
-      const uniqueness = seedLength > 0 ? uniqueChars / Math.min(26, seedLength) : 0.5;
+      const uniqueness =
+        seedLength > 0 ? uniqueChars / Math.min(26, seedLength) : 0.5;
 
       // Small PRNG for repeatable variation beyond bit shifts
       let s = h >>> 0;
@@ -166,10 +178,12 @@ export default function ThreeScene({ level = 0, isPlaying = false, seed = "" }: 
         s = (s * 1664525 + 1013904223) >>> 0; // LCG
         return s / 0xffffffff;
       };
-      const rndRange = (min: number, max: number) => min + rndUnit() * (max - min);
+      const rndRange = (min: number, max: number) =>
+        min + rndUnit() * (max - min);
 
       // Base profile: superformula with parameters informed by text features
-      const a = 1, b = 1;
+      const a = 1,
+        b = 1;
       const m = Math.max(3, Math.round(3 + uniqueness * 9));
       const n1 = 0.3 + vowelRatio * 1.7;
       const n2 = 0.3 + rndRange(0.3, 1.8);
@@ -184,7 +198,7 @@ export default function ThreeScene({ level = 0, isPlaying = false, seed = "" }: 
       const points: THREE.Vector2[] = [];
       const steps = 160;
       const rippleCount = Math.max(1, Math.min(20, wordCount + digitCount));
-      const twistAmount = (specialCount * 0.15) + rndRange(0, 0.15);
+      const twistAmount = specialCount * 0.15 + rndRange(0, 0.15);
       for (let i = 0; i <= steps; i++) {
         const t = (i / steps) * Math.PI;
         const r = superformula(t);
@@ -219,19 +233,27 @@ export default function ThreeScene({ level = 0, isPlaying = false, seed = "" }: 
         const t = -0.6 + (i + 1) * (1.2 / (ringCount + 1));
         const radius = 0.55 + rndRange(-0.08, 0.12);
         const tube = 0.02 + 0.02 * rndUnit();
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 16, 120), material);
+        const ring = new THREE.Mesh(
+          new THREE.TorusGeometry(radius, tube, 16, 120),
+          material
+        );
         ring.rotation.x = Math.PI / 2;
         ring.position.y = t;
         group.add(ring);
       }
 
       // Add spikes influenced by consonant dominance
-      const consonantRatio = seedLength > 0 ? (seedLength - vowelCount) / seedLength : 0.7;
+      const consonantRatio =
+        seedLength > 0 ? (seedLength - vowelCount) / seedLength : 0.7;
       const spikeBands = Math.round(consonantRatio * 2);
       const spikesPerBand = Math.round(8 + uniqueness * 12);
       for (let bnd = 0; bnd < spikeBands; bnd++) {
         const y = -0.3 + bnd * 0.3;
-        const spikeGeo = new THREE.ConeGeometry(0.05 + 0.03 * rndUnit(), 0.18 + 0.12 * rndUnit(), 10);
+        const spikeGeo = new THREE.ConeGeometry(
+          0.05 + 0.03 * rndUnit(),
+          0.18 + 0.12 * rndUnit(),
+          10
+        );
         for (let i = 0; i < spikesPerBand; i++) {
           const a2 = (i / spikesPerBand) * Math.PI * 2;
           const r2 = 0.6 + 0.1 * rndUnit();
@@ -244,14 +266,21 @@ export default function ThreeScene({ level = 0, isPlaying = false, seed = "" }: 
 
       // Sprinkle small gems/particles based on special characters
       const gems = Math.min(80, 10 + specialCount * 14);
-      const gemMat = new THREE.MeshStandardMaterial({ color: color.clone().offsetHSL(0.05, 0, 0).getHex(), emissive: new THREE.Color(color).multiplyScalar(0.15) });
+      const gemMat = new THREE.MeshStandardMaterial({
+        color: color.clone().offsetHSL(0.05, 0, 0).getHex(),
+        emissive: new THREE.Color(color).multiplyScalar(0.15),
+      });
       for (let i = 0; i < gems; i++) {
         const r = 0.04 + 0.02 * rndUnit();
         const gem = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 0), gemMat);
         const th = rndUnit() * Math.PI * 2;
         const ph = (rndUnit() - 0.5) * Math.PI * 0.8;
         const R = 0.9 + 0.4 * rndUnit();
-        gem.position.set(Math.cos(th) * Math.cos(ph) * R, Math.sin(ph) * R * 0.6, Math.sin(th) * Math.cos(ph) * R);
+        gem.position.set(
+          Math.cos(th) * Math.cos(ph) * R,
+          Math.sin(ph) * R * 0.6,
+          Math.sin(th) * Math.cos(ph) * R
+        );
         group.add(gem);
       }
 
@@ -299,7 +328,14 @@ export default function ThreeScene({ level = 0, isPlaying = false, seed = "" }: 
         let geometry: THREE.BufferGeometry;
         switch (variant) {
           case 0:
-            geometry = new THREE.TorusKnotGeometry(pick(0.8, 1.2, 0), pick(0.2, 0.5, 10), 200, 16, Math.floor(pick(1, 4, 20)), Math.floor(pick(1, 8, 24)));
+            geometry = new THREE.TorusKnotGeometry(
+              pick(0.8, 1.2, 0),
+              pick(0.2, 0.5, 10),
+              200,
+              16,
+              Math.floor(pick(1, 4, 20)),
+              Math.floor(pick(1, 8, 24))
+            );
             break;
           case 1:
             geometry = new THREE.IcosahedronGeometry(pick(0.9, 1.3, 4), 1);
@@ -308,7 +344,12 @@ export default function ThreeScene({ level = 0, isPlaying = false, seed = "" }: 
             geometry = new THREE.DodecahedronGeometry(pick(0.9, 1.3, 8), 0);
             break;
           default:
-            geometry = new THREE.TorusGeometry(pick(0.8, 1.4, 12), pick(0.15, 0.45, 16), 24, 180);
+            geometry = new THREE.TorusGeometry(
+              pick(0.8, 1.4, 12),
+              pick(0.15, 0.45, 16),
+              24,
+              180
+            );
         }
         const mesh = new THREE.Mesh(geometry, material);
         scene.add(mesh);
@@ -323,5 +364,3 @@ export default function ThreeScene({ level = 0, isPlaying = false, seed = "" }: 
 
   return <div ref={containerRef} style={{ width: "100%", marginTop: 24 }} />;
 }
-
-
