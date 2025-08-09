@@ -156,12 +156,10 @@ export default function TrackVisualClient(props: Props) {
 
     // Setup scene and renderer
     const width = container.clientWidth || 800;
-    const height = Math.max(
-      360,
-      Math.floor((container.clientWidth || 800) * 0.56)
-    );
+    const height = container.clientHeight || 600;
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x000000);
+    // Remove background color to let the CSS gradient show through
+    scene.background = null;
 
     const camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 100);
     camera.position.set(0, 0, 4.5);
@@ -169,6 +167,7 @@ export default function TrackVisualClient(props: Props) {
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
       canvas: canvasRef.current ?? undefined,
+      alpha: true,
     });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -604,7 +603,7 @@ export default function TrackVisualClient(props: Props) {
     // resize
     const onResize = () => {
       const w = container.clientWidth || width;
-      const h = Math.max(360, Math.floor(w * 0.56));
+      const h = container.clientHeight || height;
       renderer.setSize(w, h);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
@@ -614,20 +613,20 @@ export default function TrackVisualClient(props: Props) {
     // animate
     const tick = (t: number) => {
       uniforms.u_time.value = t * 0.001;
-      if (analyser && fftArray) {
+      if (analyser && fftArray && recipe) {
         try {
           analyser.getByteFrequencyData(
             fftArray as unknown as Uint8Array<ArrayBuffer>
           );
         } catch {}
-        const lowIdx = recipe.audioMapping.fftBands.low ?? 2;
-        const midIdx = recipe.audioMapping.fftBands.mid ?? 24;
-        const highIdx = recipe.audioMapping.fftBands.high ?? 96;
+        const lowIdx = recipe.audioMapping?.fftBands?.low ?? 2;
+        const midIdx = recipe.audioMapping?.fftBands?.mid ?? 24;
+        const highIdx = recipe.audioMapping?.fftBands?.high ?? 96;
         const low = (fftArray as Uint8Array)[lowIdx] ?? 0;
         const mid = (fftArray as Uint8Array)[midIdx] ?? 0;
         const high = (fftArray as Uint8Array)[highIdx] ?? 0;
         const energy = (low + mid + high) / (3 * 255);
-        const baseAmp = (recipe.deformation as any).amplitude ?? 0.3;
+        const baseAmp = (recipe.deformation as any)?.amplitude ?? 0.3;
         uniforms.u_amplitude.value =
           baseAmp * (0.55 * energy + 0.45 * spotifyScalar);
         mesh.rotation.y += 0.002 + 0.01 * energy;
@@ -672,26 +671,92 @@ export default function TrackVisualClient(props: Props) {
     );
   }
 
+  if (!recipe) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
+        {/* 3D Visualizer Area - Top */}
+        <div
+          ref={containerRef}
+          style={{
+            flex: 1,
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "radial-gradient(60% 60% at 50% 20%, rgba(80,38,125,0.45) 0%, rgba(18,12,24,0.85) 48%, #07070a 100%)",
+            position: "relative",
+          }}
+        >
+          <div style={{ 
+            color: "#9aa0a6", 
+            textAlign: "center",
+            padding: "24px",
+            background: "rgba(14,14,18,0.5)",
+            borderRadius: "12px",
+            border: "1px solid rgba(255,255,255,0.08)"
+          }}>
+            Loading visualizer...
+          </div>
+        </div>
+        
+        {/* Music Player - Bottom */}
+        <div style={{ 
+          padding: "24px", 
+          background: "rgba(14,14,18,0.94)",
+          display: "flex",
+          justifyContent: "center"
+        }}>
+          <div style={{ maxWidth: "500px", width: "100%" }}>
+            <TrackPlayer
+              {...props}
+              previewUrl={resolvedPreviewUrl ?? undefined}
+              onPlayingChange={setIsPlaying}
+              onAnalyserReady={handleAnalyserReady}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div>
-      <TrackPlayer
-        {...props}
-        previewUrl={resolvedPreviewUrl ?? undefined}
-        onPlayingChange={setIsPlaying}
-        onAnalyserReady={handleAnalyserReady}
-      />
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
+      {/* 3D Visualizer Area - Top */}
       <div
         ref={containerRef}
         style={{
+          flex: 1,
           width: "100%",
-          marginTop: 24,
-          height: 360,
           position: "relative",
+          background: "radial-gradient(60% 60% at 50% 20%, rgba(80,38,125,0.45) 0%, rgba(18,12,24,0.85) 48%, #07070a 100%)",
         }}
       >
-        <canvas ref={canvasRef} />
+        <canvas 
+          ref={canvasRef} 
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "block"
+          }}
+        />
       </div>
-
+      
+      {/* Music Player - Bottom */}
+      <div style={{ 
+        padding: "24px", 
+        background: "rgba(14,14,18,0.94)",
+        display: "flex",
+        justifyContent: "center"
+      }}>
+        <div style={{ maxWidth: "500px", width: "100%" }}>
+          <TrackPlayer
+            {...props}
+            previewUrl={resolvedPreviewUrl ?? undefined}
+            onPlayingChange={setIsPlaying}
+            onAnalyserReady={handleAnalyserReady}
+          />
+        </div>
+      </div>
     </div>
   );
 }

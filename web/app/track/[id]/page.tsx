@@ -146,12 +146,29 @@ export default async function TrackPage({
   }
 
   return (
-    <TrackVisualClient
-      title={title}
-      artistNames={artistNames}
-      albumImageUrl={albumImageUrl}
-      previewUrl={previewUrl}
-      spotifyUrl={spotifyUrl}
-    />
+    <div style={{ height: "100vh", position: "relative" }}>
+      {/* Back button overlay */}
+      <div style={{ 
+        position: "absolute", 
+        top: "24px", 
+        left: "24px", 
+        zIndex: 10,
+        background: "rgba(14,14,18,0.8)",
+        padding: "8px 16px",
+        borderRadius: "8px",
+        border: "1px solid rgba(255,255,255,0.1)"
+      }}>
+        <Link href="/" style={{ color: "#9aa0a6", textDecoration: "none" }}>← Back</Link>
+      </div>
+      
+      <TrackVisualClient
+        title={title}
+        artistNames={artistNames}
+        albumImageUrl={albumImageUrl}
+        previewUrl={previewUrl}
+        spotifyUrl={spotifyUrl}
+        spotifyId={id}
+      />
+    </div>
   );
 }
