@@ -1,6 +1,5 @@
 import Link from "next/link";
-import TrackPlayer from "@/components/TrackPlayer";
-import ThreeScene from "@/components/ThreeScene";
+import TrackVisualClient from "@/components/TrackVisualClient";
 
 async function getTrack(id: string, accessToken: string) {
   const res = await fetch(`https://api.spotify.com/v1/tracks/${id}`, {
@@ -58,14 +57,13 @@ export default async function TrackPage({ params }: { params: { id: string } }) 
       <div style={{ marginBottom: 12 }}>
         <Link href="/">← Back</Link>
       </div>
-      <TrackPlayer
+      <TrackVisualClient
         title={title}
         artistNames={artistNames}
         albumImageUrl={albumImageUrl}
         previewUrl={previewUrl}
         spotifyUrl={spotifyUrl}
       />
-      <ThreeScene />
     </div>
   );
 }

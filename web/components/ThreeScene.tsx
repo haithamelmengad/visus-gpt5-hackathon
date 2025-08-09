@@ -3,9 +3,19 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 
-export default function ThreeScene() {
+export default function ThreeScene({ level = 0, isPlaying = false }: { level?: number; isPlaying?: boolean }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
+  const levelRef = useRef<number>(0);
+  const playingRef = useRef<boolean>(false);
+  // Keep latest level available to the animation loop without re-creating the scene
+  useEffect(() => {
+    levelRef.current = level;
+  }, [level]);
+
+  useEffect(() => {
+    playingRef.current = isPlaying;
+  }, [isPlaying]);
 
   useEffect(() => {
     const container = containerRef.current!;
@@ -42,9 +52,16 @@ export default function ThreeScene() {
     const resizeObserver = new ResizeObserver(onResize);
     resizeObserver.observe(container);
 
+    let displayedScale = 1;
     const animate = () => {
-      cube.rotation.x += 0.01;
-      cube.rotation.y += 0.02;
+      if (playingRef.current) {
+        cube.rotation.x += 0.01;
+        cube.rotation.y += 0.02;
+      }
+      // Map level (0..1) to a pleasant scale range and smooth it a bit
+      const target = 1 + Math.min(1, Math.max(0, levelRef.current)) * 0.8;
+      displayedScale += (target - displayedScale) * 0.2; // simple easing
+      cube.scale.setScalar(displayedScale);
       renderer.render(scene, camera);
       rafRef.current = requestAnimationFrame(animate);
     };
