@@ -20,9 +20,12 @@ export default async function TrackPage({ params }: { params: { id: string } }) 
   const session = await getServerSession(authOptions);
   if (!session || !(session as any).accessToken) {
     return (
-      <div style={{ padding: 24 }}>
-        <p>You must be signed in.</p>
-        <Link href="/">Go home</Link>
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+        background: "radial-gradient(60% 60% at 50% 20%, rgba(80,38,125,0.45) 0%, rgba(18,12,24,0.85) 48%, #07070a 100%)" }}>
+        <div style={{ width: 560, maxWidth: "100%", background: "rgba(14,14,18,0.94)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 18, padding: 16 }}>
+          <p style={{ color: "#eaeaea" }}>You must be signed in.</p>
+          <Link href="/" style={{ color: "#9aa0a6" }}>Go home</Link>
+        </div>
       </div>
     );
   }
@@ -53,18 +56,13 @@ export default async function TrackPage({ params }: { params: { id: string } }) 
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 720, margin: "0 auto" }}>
-      <div style={{ marginBottom: 12 }}>
-        <Link href="/">← Back</Link>
-      </div>
-      <TrackVisualClient
-        title={title}
-        artistNames={artistNames}
-        albumImageUrl={albumImageUrl}
-        previewUrl={previewUrl}
-        spotifyUrl={spotifyUrl}
-      />
-    </div>
+    <TrackVisualClient
+      title={title}
+      artistNames={artistNames}
+      albumImageUrl={albumImageUrl}
+      previewUrl={previewUrl}
+      spotifyUrl={spotifyUrl}
+    />
   );
 }
 

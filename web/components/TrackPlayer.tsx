@@ -19,6 +19,8 @@ export default function TrackPlayer({ title, artistNames, albumImageUrl, preview
   const analyserRef = useRef<AnalyserNode | null>(null);
   const dataRef = useRef<Uint8Array | null>(null);
   const rafRef = useRef<number | null>(null);
+  const [currentTimeSec, setCurrentTimeSec] = useState(0);
+  const [durationSec, setDurationSec] = useState(0);
 
   useEffect(() => {
     if (!previewUrl) return;
@@ -71,6 +73,11 @@ export default function TrackPlayer({ title, artistNames, albumImageUrl, preview
       audio.addEventListener("pause", onPause);
       audio.addEventListener("ended", onPause);
 
+      const onLoaded = () => setDurationSec(audio.duration || 0);
+      const onTime = () => setCurrentTimeSec(audio.currentTime || 0);
+      audio.addEventListener("loadedmetadata", onLoaded);
+      audio.addEventListener("timeupdate", onTime);
+
       // Cleanup
       return () => {
         try {
@@ -83,6 +90,8 @@ export default function TrackPlayer({ title, artistNames, albumImageUrl, preview
         audio.removeEventListener("play", onPlay);
         audio.removeEventListener("pause", onPause);
         audio.removeEventListener("ended", onPause);
+        audio.removeEventListener("loadedmetadata", onLoaded);
+        audio.removeEventListener("timeupdate", onTime);
         onPlayingChange?.(false);
       };
     } catch {}
@@ -132,29 +141,105 @@ export default function TrackPlayer({ title, artistNames, albumImageUrl, preview
     onPlayingChange?.(false);
   };
 
+  const handleSeek = (evt: React.MouseEvent<HTMLDivElement>) => {
+    const bar = evt.currentTarget.getBoundingClientRect();
+    const fraction = Math.min(1, Math.max(0, (evt.clientX - bar.left) / bar.width));
+    if (audioRef.current && durationSec > 0) {
+      audioRef.current.currentTime = fraction * durationSec;
+      setCurrentTimeSec(audioRef.current.currentTime);
+    }
+  };
+
+  const formatTime = (sec: number) => {
+    if (!isFinite(sec) || sec <= 0) return "0:00";
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+
+  const controlPillBase: React.CSSProperties = {
+    width: 34,
+    height: 34,
+    borderRadius: 18,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "#1b1b1f",
+    color: "#d8d8de",
+    border: "1px solid rgba(255,255,255,0.06)",
+    cursor: "pointer",
+  };
+
+  const progressOuter: React.CSSProperties = {
+    width: "100%",
+    height: 6,
+    borderRadius: 999,
+    background: "#2a2a2f",
+    overflow: "hidden",
+    border: "1px solid rgba(255,255,255,0.05)",
+  };
+  const progressInner: React.CSSProperties = {
+    height: "100%",
+    borderRadius: 999,
+    background: "#9aa0a6",
+    width: durationSec > 0 ? `${Math.min(100, (currentTimeSec / durationSec) * 100)}%` : "0%",
+    transition: "width 100ms linear",
+  };
+
   return (
-    <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-      {albumImageUrl && (
-        <img src={albumImageUrl} alt={title} width={120} height={120} style={{ borderRadius: 8, objectFit: "cover" }} />
-      )}
-      <div>
-        <div style={{ fontSize: 22, fontWeight: 700 }}>{title}</div>
-        <div style={{ color: "#aaa", marginBottom: 8 }}>{artistNames}</div>
-        {previewUrl ? (
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button onClick={handleManualPlay}>Play</button>
-            <button onClick={handlePause}>Pause</button>
-            {autoplayError && <span style={{ color: "#f88" }}>(Autoplay blocked — click Play)</span>}
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {albumImageUrl && (
+            <img
+              src={albumImageUrl}
+              alt={title}
+              width={64}
+              height={64}
+              style={{ borderRadius: 12, objectFit: "cover", border: "1px solid rgba(255,255,255,0.08)" }}
+            />)
+          }
+          <div>
+            <div style={{ fontSize: 12, color: "#9aa0a6" }}>{artistNames}</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#f2f2f7" }}>{title}</div>
           </div>
-        ) : (
-          <div style={{ color: "#888" }}>No 30s preview available for this track.</div>
-        )}
-        {spotifyUrl && (
-          <div style={{ marginTop: 8 }}>
-            <a href={spotifyUrl} target="_blank" rel="noreferrer">Open in Spotify</a>
-          </div>
-        )}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button onClick={() => window.history.back()} aria-label="Back" style={controlPillBase}>↩</button>
+          {previewUrl ? (
+            audioRef.current && !audioRef.current.paused ? (
+              <button onClick={handlePause} aria-label="Pause" style={controlPillBase}>❚❚</button>
+            ) : (
+              <button onClick={handleManualPlay} aria-label="Play" style={controlPillBase}>▶</button>
+            )
+          ) : (
+            <div style={{ ...controlPillBase, opacity: 0.5, cursor: "not-allowed" }}>–</div>
+          )}
+        </div>
       </div>
+
+      <div style={{ height: 12 }} />
+
+      {previewUrl ? (
+        <div>
+          <div onClick={handleSeek} style={progressOuter}>
+            <div style={progressInner} />
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, color: "#9aa0a6", fontSize: 12 }}>
+            <span>{formatTime(currentTimeSec)}</span>
+            <span>{formatTime(durationSec)}</span>
+          </div>
+          {autoplayError && <div style={{ marginTop: 6, color: "#f88", fontSize: 12 }}>(Autoplay blocked — click Play)</div>}
+        </div>
+      ) : (
+        <div style={{ color: "#888" }}>No 30s preview available for this track.</div>
+      )}
+
+      {spotifyUrl && (
+        <div style={{ marginTop: 8 }}>
+          <a href={spotifyUrl} target="_blank" rel="noreferrer" style={{ color: "#9aa0a6", fontSize: 12 }}>Open in Spotify</a>
+        </div>
+      )}
     </div>
   );
 }
