@@ -691,6 +691,7 @@ export default function TrackVisualClient(props: Props) {
       >
         <canvas ref={canvasRef} />
       </div>
+
     </div>
   );
 }

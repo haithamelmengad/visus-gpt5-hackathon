@@ -35,14 +35,16 @@ export default function ThreeScene({
     const height = 360;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0b0b0b);
+    // Transparent background so the page gradient shows through
+    scene.background = null;
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
     camera.position.z = 3;
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setClearColor(0x000000, 0);
     renderer.setSize(width, height);
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
