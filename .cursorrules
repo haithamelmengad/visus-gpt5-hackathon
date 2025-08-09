@@ -1,0 +1,53 @@
+Project: Visus (Next.js + Three.js)
+
+Purpose
+- Build a Spotify-powered 3D, audio–reactive visualizer.
+- Core app located in `web/` (Next.js App Router, TypeScript).
+
+Primary Files
+- `web/components/ThreeScene.tsx`: 3D scene setup, animation loop, seed-driven geometry.
+- `web/components/TrackPlayer.tsx`: audio preview + level metering; drives `level` and `isPlaying` props.
+- `web/components/TrackVisualClient.tsx`: composes player and scene; passes seed from track title/artist.
+- `web/app/**`: pages and API routes (e.g., NextAuth + Spotify).
+
+Runbook (Non-interactive)
+- cd `web`
+- Ensure `.env.local` exists with keys: `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL=http://localhost:3000`.
+- Install deps: `npm ci || npm install`
+- Dev server: `npm run dev`
+- Health check: `GET http://localhost:3000` should return 200.
+
+Engineering Rules
+- Performance: keep geometries moderately low poly; prefer `BufferGeometry`; dispose `geometry`/`material` on teardown; keep animation in a single rAF loop using refs.
+- Determinism: any seed → deterministic visual (use stable PRNG, do not rely on `Math.random()` without seeding).
+- No text models: do not render text meshes to represent the seed; use geometry that visually encodes/evokes the words.
+- Avoid hardcoded keyword lists where possible. If semantic matching is required, prefer fuzzy matching with small canonical sets and keep it data-driven.
+- Accessibility/UX: maintain smooth 60fps where possible; avoid blocking main thread; keep canvas background dark; respect play/pause.
+- Security: never commit secrets; use `.env.local`. Do not log access tokens.
+- Types: use TypeScript types; avoid `any` in new code; keep names descriptive.
+- Formatting: match existing style; no inline narration comments; add brief comments only where logic is non-obvious.
+
+When Editing 3D Code
+- Keep camera/light setup minimal; avoid global state.
+- Fit models into view and center them after construction.
+- For audio reactivity: map `level` ∈ [0,1] to scale/rotation subtly; avoid abrupt jumps (use easing).
+- Always dispose geometries/materials in cleanup and when replacing meshes.
+
+NextAuth / Spotify
+- OAuth redirect must be `http://localhost:3000/api/auth/callback/spotify`.
+- JWT strategy with token refresh in `web/lib/auth.ts`; do not break callbacks.
+
+File Ownership
+- Safe to modify: `web/components/*`, `web/app/**/*.tsx`, `web/app/api/**`, `web/globals.css`.
+- Be cautious: `web/lib/auth.ts`, `web/next.config.ts`, `web/tsconfig.json` (update only when required).
+
+Commit Guidance
+- Write descriptive commit messages in imperative mood (e.g., "Implement seed-driven semantic butterfly shape").
+- Keep edits scoped; avoid unrelated formatting.
+
+Assistant Output Style
+- Default to concise responses. Use code fences only for changed snippets or commands.
+- Always refer to files with backticks, e.g., `web/components/ThreeScene.tsx`.
+- Prefer absolute paths when invoking tools.
+
+
