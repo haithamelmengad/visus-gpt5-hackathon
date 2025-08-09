@@ -10,6 +10,7 @@ type RecentPlayedItem = {
     artists: { name: string }[];
     album: { name: string; images?: { url: string }[] };
     external_urls?: { spotify?: string };
+    preview_url?: string | null;
   };
   played_at: string;
 };
@@ -77,6 +78,7 @@ export default function Home() {
       <ul style={{ listStyle: "none", padding: 0 }}>
         {items.map((item) => {
           const href = `/track/${encodeURIComponent(item.track.id)}?title=${encodeURIComponent(item.track.name)}`;
+          const hasPreview = Boolean(item.track.preview_url);
           return (
             <li key={`${item.track.id}-${item.played_at}`} style={{ marginBottom: 12 }}>
               <a href={href} style={{ display: "flex", gap: 12, alignItems: "center", textDecoration: "none", color: "inherit" }}>
@@ -93,6 +95,9 @@ export default function Home() {
                     {item.track.artists.map((a) => a.name).join(", ")} – {item.track.album.name}
                   </div>
                   <div style={{ fontSize: 12, color: "#888" }}>Played at {new Date(item.played_at).toLocaleString()}</div>
+                  <div style={{ fontSize: 12, color: hasPreview ? "#4caf50" : "#999" }}>
+                    {hasPreview ? "Preview available" : "No preview"}
+                  </div>
                 </div>
               </a>
             </li>
