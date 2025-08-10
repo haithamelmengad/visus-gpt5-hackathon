@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { cacheGetOrSet } from "@/lib/cache";
+import { cacheGetOrSet, cacheSet } from "@/lib/cache";
 
 const inputSchema = z.object({ prompt: z.string().min(8) });
 

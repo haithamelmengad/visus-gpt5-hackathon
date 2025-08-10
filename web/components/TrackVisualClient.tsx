@@ -305,8 +305,9 @@ export default function TrackVisualClient(props: Props) {
           "false";
         if (!enable) return;
 
-        console.log(`[CLIENT] Requesting Meshy prompt for track ID: ${props.spotifyId}`);
+        console.log(`[CLIENT] Requesting Meshy prompt/model for track ID: ${props.spotifyId}`);
 
+        // First ask for cached modelUrl/prompt
         const promptRes = await fetch(`/api/visualizer/meshy`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -315,40 +316,45 @@ export default function TrackVisualClient(props: Props) {
             includeAnalysis: false,
           }),
         });
-        
+
         if (!promptRes.ok) {
           console.log(`[CLIENT] Meshy prompt error: ${promptRes.status}`);
           setMeshyStatus(`meshy prompt error: ${promptRes.status}`);
           return;
         }
-        
-        const { prompt } = (await promptRes.json()) as { prompt?: string };
-        console.log(`[CLIENT] Received Meshy prompt: "${prompt}"`);
-        
-        if (!prompt) return;
 
-        console.log(`[CLIENT] Starting Meshy 3D generation with prompt: "${prompt}"`);
-        
-        const startRes = await fetch(`/api/visualizer/meshy/start`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt }),
-        });
-        
-        if (!startRes.ok) {
-          const txt = await startRes.text();
-          console.log(`[CLIENT] Meshy start error: ${startRes.status} - ${txt}`);
-          setMeshyStatus(`meshy start error: ${startRes.status}`);
-          console.warn("meshy start error", txt);
-          return;
-        }
-        
-        const startJson = (await startRes.json()) as { id?: string };
-        console.log(`[CLIENT] Meshy generation started with ID: ${startJson.id}`);
-        
-        if (!startJson.id) return;
-
+        const promptJson = (await promptRes.json()) as { prompt?: string; modelUrl?: string };
         let modelUrl: string | null = null;
+        if (promptJson.modelUrl) {
+          console.log(`[CLIENT] Using cached Meshy model URL: ${promptJson.modelUrl}`);
+          modelUrl = promptJson.modelUrl;
+        }
+
+        let startJson: { id?: string } = {};
+        if (!modelUrl) {
+          if (!promptJson.prompt) return;
+          const prompt = promptJson.prompt;
+          console.log(`[CLIENT] Starting Meshy 3D generation with prompt: "${prompt}"`);
+
+          const startRes = await fetch(`/api/visualizer/meshy/start`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt }),
+          });
+
+          if (!startRes.ok) {
+            const txt = await startRes.text();
+            console.log(`[CLIENT] Meshy start error: ${startRes.status} - ${txt}`);
+            setMeshyStatus(`meshy start error: ${startRes.status}`);
+            console.warn("meshy start error", txt);
+            return;
+          }
+
+          startJson = (await startRes.json()) as { id?: string };
+          console.log(`[CLIENT] Meshy generation started with ID: ${startJson.id}`);
+          if (!startJson.id) return;
+        }
+
         const pickModelUrl = (j: any): string | null => {
           if (typeof j?.model_url === "string") return j.model_url as string;
           if (typeof j?.modelUrl === "string") return j.modelUrl as string;

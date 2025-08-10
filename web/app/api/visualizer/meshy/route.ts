@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import { z } from "zod";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { cacheGetOrSet, cacheGet } from "@/lib/cache";
 
 const inputSchema = z.object({
   spotifyId: z.string(),
@@ -17,6 +18,12 @@ export async function POST(req: Request) {
   }
 
   const { spotifyId, includeAnalysis } = parsed.data;
+
+  // Fast path: if we already have a cached model URL for this track, return it immediately
+  const cachedModelUrl = cacheGet<string>(`meshy:modelUrl:${spotifyId}`);
+  if (cachedModelUrl && typeof cachedModelUrl === "string") {
+    return NextResponse.json({ modelUrl: cachedModelUrl });
+  }
 
   // Enrich with Spotify like the recipe route
   const session = await getServerSession(authOptions).catch(() => null);
@@ -123,14 +130,20 @@ export async function POST(req: Request) {
     console.log(`[MESHY] Generating prompt for track: ${fullContext.core.title} by ${fullContext.core.artist}`);
     console.log(`[MESHY] Using model: ${model}`);
     
-    const completion = await openai.chat.completions.create({
-      model,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      response_format: { type: "text" } as any,
-    });
+    // Cache the generated prompt by spotifyId so we reuse the same Meshy prompt across sessions
+    const completion = await cacheGetOrSet(
+      `meshy:prompt:${spotifyId}:analysis:${includeAnalysis ? 1 : 0}`,
+      parseInt(process.env.MESHY_PROMPT_CACHE_TTL_MS || "86400000", 10), // 24h default
+      async () =>
+        openai.chat.completions.create({
+          model,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
+          response_format: { type: "text" } as any,
+        })
+    );
     
     let prompt = (completion.choices[0]?.message?.content || "").trim();
     // Ensure the primary artist name is present first and condense words after the dash

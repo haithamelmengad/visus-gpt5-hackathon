@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { cacheGetOrSet } from "@/lib/cache";
+import { cacheGetOrSet, cacheSet } from "@/lib/cache";
 
 // GET /api/visualizer/meshy/status?id=...
 export async function GET(req: Request) {
@@ -61,6 +61,34 @@ export async function GET(req: Request) {
     );
 
     if (status < 200 || status >= 300) return NextResponse.json(json, { status });
+    // Persist modelUrl if present so future runs can short-circuit
+    try {
+      const tryModelUrls = (obj: any): string | null => {
+        if (!obj || typeof obj !== "object") return null;
+        const glb = (obj as any).glb ?? (obj as any).GLB;
+        const gltf = (obj as any).gltf ?? (obj as any).GLTF;
+        if (typeof glb === "string") return glb;
+        if (typeof gltf === "string") return gltf;
+        return null;
+      };
+      let modelUrl: string | null = null;
+      modelUrl = (json && (json.model_url || json.modelUrl)) || null;
+      if (!modelUrl) modelUrl = tryModelUrls(json?.model_urls) || tryModelUrls(json?.modelUrls);
+      if (!modelUrl && Array.isArray(json?.assets)) {
+        for (const a of json.assets as any[]) {
+          const url = typeof a?.url === "string" ? a.url : null;
+          const fmt = (a?.format ?? a?.type ?? a?.mimeType ?? "").toString().toLowerCase();
+          if (url && (url.endsWith(".glb") || url.endsWith(".gltf") || fmt.includes("glb") || fmt.includes("gltf"))) {
+            modelUrl = url; break;
+          }
+        }
+      }
+      const sid = json?.task_id || json?.id || id;
+      const trackId = json?.metadata?.spotifyId || json?.spotifyId; // best-effort if backend echoes it
+      if (typeof modelUrl === "string" && modelUrl && typeof trackId === "string") {
+        cacheSet(`meshy:modelUrl:${trackId}`, modelUrl, parseInt(process.env.MESHY_MODEL_URL_TTL_MS || "604800000", 10)); // 7d
+      }
+    } catch {}
     return NextResponse.json(json);
   } catch (e: unknown) {
     return NextResponse.json(

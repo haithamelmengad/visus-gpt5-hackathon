@@ -4,6 +4,7 @@
 type CacheEntry<T> = { value: T; expiresAt: number };
 
 const GLOBAL_CACHE_KEY = "__visus_ttl_cache__";
+const GLOBAL_INFLIGHT_KEY = "__visus_ttl_cache_inflight__";
 
 function getStore(): Map<string, CacheEntry<unknown>> {
   const g = globalThis as unknown as Record<string, unknown>;
@@ -11,6 +12,14 @@ function getStore(): Map<string, CacheEntry<unknown>> {
     g[GLOBAL_CACHE_KEY] = new Map<string, CacheEntry<unknown>>();
   }
   return g[GLOBAL_CACHE_KEY] as Map<string, CacheEntry<unknown>>;
+}
+
+function getInFlightStore(): Map<string, Promise<unknown>> {
+  const g = globalThis as unknown as Record<string, unknown>;
+  if (!g[GLOBAL_INFLIGHT_KEY]) {
+    g[GLOBAL_INFLIGHT_KEY] = new Map<string, Promise<unknown>>();
+  }
+  return g[GLOBAL_INFLIGHT_KEY] as Map<string, Promise<unknown>>;
 }
 
 export function cacheGet<T>(key: string): T | undefined {
@@ -37,9 +46,24 @@ export async function cacheGetOrSet<T>(
 ): Promise<T> {
   const existing = cacheGet<T>(key);
   if (existing !== undefined) return existing;
-  const value = await compute();
-  cacheSet(key, value, ttlMs);
-  return value;
+
+  // Single-flight: if another request is already computing this key, await it
+  const inFlightStore = getInFlightStore();
+  const inProgress = inFlightStore.get(key) as Promise<T> | undefined;
+  if (inProgress) return inProgress;
+
+  const promise = (async () => {
+    try {
+      const value = await compute();
+      cacheSet(key, value, ttlMs);
+      return value;
+    } finally {
+      // Ensure cleanup even if compute throws
+      inFlightStore.delete(key);
+    }
+  })();
+  inFlightStore.set(key, promise as unknown as Promise<unknown>);
+  return promise;
 }
 
 export function cacheDelete(key: string): void {
