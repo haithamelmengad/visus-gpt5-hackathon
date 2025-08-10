@@ -2,6 +2,8 @@
 
 import { signIn, signOut, useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
+import TrackListSkeleton from "@/components/TrackListSkeleton";
+import LoginSkeleton from "@/components/LoginSkeleton";
 
 type RecentPlayedItem = {
   track: {
@@ -21,6 +23,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -28,25 +31,24 @@ export default function Home() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch("/api/spotify/recent?limit=50", { cache: "no-store" });
+        const res = await fetch("/api/spotify/recent?limit=50", {
+          cache: "no-store",
+        });
         if (!res.ok) {
           const msg = await res.text();
           throw new Error(msg || `Request failed: ${res.status}`);
         }
         const data = await res.json();
         setItems(data.items ?? []);
-      } catch (e: any) {
-        setError(e.message ?? "Failed to load");
+      } catch (e: unknown) {
+        const errorMessage = e instanceof Error ? e.message : "Failed to load";
+        setError(errorMessage);
       } finally {
         setLoading(false);
       }
     }
     load();
   }, [session]);
-
-  if (status === "loading") {
-    return <div style={{ padding: 24 }}>Loading…</div>;
-  }
 
   const gradientBg: React.CSSProperties = {
     minHeight: "100vh",
@@ -62,28 +64,13 @@ export default function Home() {
   const panelStyle: React.CSSProperties = {
     width: 560,
     maxWidth: "100%",
-    background: "linear-gradient(180deg, rgba(22,22,26,0.94), rgba(12,12,16,0.96))",
+    background:
+      "linear-gradient(180deg, rgba(22,22,26,0.94), rgba(12,12,16,0.96))",
     border: "1px solid rgba(255,255,255,0.08)",
     borderRadius: 18,
     boxShadow: "0 10px 40px rgba(0,0,0,0.55)",
     padding: 16,
     color: "#eaeaea",
-  };
-
-  const titleRowStyle: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "8px 10px 12px 10px",
-  };
-
-  const listStyle: React.CSSProperties = { listStyle: "none", padding: 6, margin: 0 };
-
-  const footerStyle: React.CSSProperties = {
-    textAlign: "center",
-    marginTop: 14,
-    color: "#9aa0a6",
-    fontSize: 12,
   };
 
   const centerWrap: React.CSSProperties = {
@@ -92,6 +79,44 @@ export default function Home() {
     alignItems: "center",
     justifyContent: "center",
     width: "100%",
+  };
+
+  const footerStyle: React.CSSProperties = {
+    textAlign: "center",
+    marginTop: 14,
+    color: "#9aa0a6",
+    fontSize: 12,
+  };
+
+  const handleSignOut = () => {
+    setIsLoggingOut(true);
+    signOut({ callbackUrl: "/" });
+  };
+
+  if (status === "loading" || isLoggingOut) {
+    return (
+      <div style={gradientBg}>
+        <div style={centerWrap}>
+          <div style={panelStyle}>
+            <LoginSkeleton />
+          </div>
+        </div>
+        <div style={footerStyle}>[ stems labs ]</div>
+      </div>
+    );
+  }
+
+  const titleRowStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "8px 10px 12px 10px",
+  };
+
+  const listStyle: React.CSSProperties = {
+    listStyle: "none",
+    padding: 6,
+    margin: 0,
   };
 
   // Buttons
@@ -105,11 +130,12 @@ export default function Home() {
     fontWeight: 600,
     fontSize: 14,
     cursor: "pointer",
-    transition: "transform 120ms ease, box-shadow 120ms ease, background 160ms ease, border-color 160ms ease",
+    transition:
+      "transform 120ms ease, box-shadow 120ms ease, background 160ms ease, border-color 160ms ease",
   };
-  
+
   const signOutBtn: React.CSSProperties = {
-    appearance: "none" as any,
+    appearance: "none",
     background: "transparent",
     border: "none",
     outline: "none",
@@ -129,7 +155,11 @@ export default function Home() {
         <div style={centerWrap}>
           <div style={panelStyle}>
             <div style={{ textAlign: "center", padding: 10 }}>
-              <h2 style={{ margin: 0, fontSize: 32, lineHeight: 1.15 }}>Visualize your favorite<br/>music</h2>
+              <h2 style={{ margin: 0, fontSize: 32, lineHeight: 1.15 }}>
+                Visualize your favorite
+                <br />
+                music
+              </h2>
               <div style={{ height: 16 }} />
               <button
                 onClick={() => signIn("spotify")}
@@ -165,7 +195,7 @@ export default function Home() {
             <h2 style={{ margin: 0 }}>Recently Played</h2>
             <div style={{ display: "flex", gap: 8 }}>
               <button
-                onClick={() => signOut()}
+                onClick={handleSignOut}
                 style={signOutBtn}
                 aria-label="Sign out"
                 title="Sign out"
@@ -189,21 +219,26 @@ export default function Home() {
             </div>
           </div>
 
-          {loading && <p style={{ padding: "0 10px" }}>Loading…</p>}
+          {loading && <TrackListSkeleton count={8} />}
           {error && (
             <p style={{ padding: "0 10px", color: "#ff8585" }}>{error}</p>
           )}
 
           {items.length === 0 && !loading && !error && (
             <div style={{ color: "#9aa0a6", marginTop: 8, padding: "0 10px" }}>
-              No recently played tracks returned. Try playing a track in Spotify, then click Refresh.
+              No recently played tracks returned. Try playing a track in
+              Spotify, then click Refresh.
             </div>
           )}
 
           <ul style={listStyle}>
             {items.map((item, idx) => {
-              const href = `/track/${encodeURIComponent(item.track.id)}?title=${encodeURIComponent(item.track.name)}`;
-              const artistNames = item.track.artists.map((a) => a.name).join(", ");
+              const href = `/track/${encodeURIComponent(
+                item.track.id
+              )}?title=${encodeURIComponent(item.track.name)}`;
+              const artistNames = item.track.artists
+                .map((a) => a.name)
+                .join(", ");
               const hovered = hoverIdx === idx;
               const rowStyle: React.CSSProperties = {
                 display: "flex",
@@ -211,9 +246,12 @@ export default function Home() {
                 justifyContent: "space-between",
                 padding: "10px 12px",
                 borderRadius: 12,
-                border: hovered ? "1px solid rgba(255,255,255,0.35)" : "1px solid transparent",
+                border: hovered
+                  ? "1px solid rgba(255,255,255,0.35)"
+                  : "1px solid transparent",
                 background: hovered ? "rgba(255,255,255,0.04)" : "transparent",
-                transition: "background 160ms ease, border-color 160ms ease, transform 160ms ease",
+                transition:
+                  "background 160ms ease, border-color 160ms ease, transform 160ms ease",
               };
               const rightPill: React.CSSProperties = {
                 marginLeft: 12,
@@ -229,17 +267,32 @@ export default function Home() {
                 flex: "0 0 auto",
               };
               return (
-                <li key={`${item.track.id}-${item.played_at}`} style={{ marginBottom: 6 }}>
+                <li
+                  key={`${item.track.id}-${item.played_at}`}
+                  style={{ marginBottom: 6 }}
+                >
                   <a
                     href={href}
                     onMouseEnter={() => setHoverIdx(idx)}
-                    onMouseLeave={() => setHoverIdx((curr) => (curr === idx ? null : curr))}
+                    onMouseLeave={() =>
+                      setHoverIdx((curr) => (curr === idx ? null : curr))
+                    }
                     style={{ textDecoration: "none", color: "inherit" }}
                   >
                     <div style={rowStyle}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 12,
+                        }}
+                      >
                         <img
-                          src={item.track.album.images?.[2]?.url || item.track.album.images?.[0]?.url || "/vercel.svg"}
+                          src={
+                            item.track.album.images?.[2]?.url ||
+                            item.track.album.images?.[0]?.url ||
+                            "/vercel.svg"
+                          }
                           alt={item.track.name}
                           width={48}
                           height={48}
@@ -250,8 +303,18 @@ export default function Home() {
                           }}
                         />
                         <div>
-                          <div style={{ fontSize: 12, color: "#9aa0a6", marginBottom: 2 }}>{artistNames}</div>
-                          <div style={{ fontWeight: 600, color: "#f2f2f7" }}>{item.track.name}</div>
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "#9aa0a6",
+                              marginBottom: 2,
+                            }}
+                          >
+                            {artistNames}
+                          </div>
+                          <div style={{ fontWeight: 600, color: "#f2f2f7" }}>
+                            {item.track.name}
+                          </div>
                         </div>
                       </div>
                       <div style={rightPill}>▶</div>

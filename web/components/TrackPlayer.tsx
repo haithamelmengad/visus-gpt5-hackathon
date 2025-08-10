@@ -13,7 +13,16 @@ type Props = {
   onAnalyserReady?: (analyser: AnalyserNode) => void;
 };
 
-export default function TrackPlayer({ title, artistNames, albumImageUrl, previewUrl, spotifyUrl, onLevelChange, onPlayingChange, onAnalyserReady }: Props) {
+export default function TrackPlayer({
+  title,
+  artistNames,
+  albumImageUrl,
+  previewUrl,
+  spotifyUrl,
+  onLevelChange,
+  onPlayingChange,
+  onAnalyserReady,
+}: Props) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [autoplayError, setAutoplayError] = useState<string | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -78,7 +87,8 @@ export default function TrackPlayer({ title, artistNames, albumImageUrl, preview
     try {
       // Lazily create AudioContext and analyser on first play to satisfy policies
       if (!audioCtxRef.current) {
-        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const ctx = new (window.AudioContext ||
+          (window as any).webkitAudioContext)();
         audioCtxRef.current = ctx;
         const source = ctx.createMediaElementSource(audio);
         const analyser = ctx.createAnalyser();
@@ -89,7 +99,9 @@ export default function TrackPlayer({ title, artistNames, albumImageUrl, preview
         analyserRef.current = analyser;
         dataRef.current = new Uint8Array(analyser.frequencyBinCount);
         // Expose analyser
-        try { onAnalyserReady?.(analyser); } catch {}
+        try {
+          onAnalyserReady?.(analyser);
+        } catch {}
         // Start RMS loop
         const tick = () => {
           const analyserNode = analyserRef.current;
@@ -127,7 +139,10 @@ export default function TrackPlayer({ title, artistNames, albumImageUrl, preview
 
   const handleSeek = (evt: React.MouseEvent<HTMLDivElement>) => {
     const bar = evt.currentTarget.getBoundingClientRect();
-    const fraction = Math.min(1, Math.max(0, (evt.clientX - bar.left) / bar.width));
+    const fraction = Math.min(
+      1,
+      Math.max(0, (evt.clientX - bar.left) / bar.width)
+    );
     if (audioRef.current && durationSec > 0) {
       audioRef.current.currentTime = fraction * durationSec;
       setCurrentTimeSec(audioRef.current.currentTime);
@@ -166,7 +181,10 @@ export default function TrackPlayer({ title, artistNames, albumImageUrl, preview
     height: "100%",
     borderRadius: 999,
     background: "#9aa0a6",
-    width: durationSec > 0 ? `${Math.min(100, (currentTimeSec / durationSec) * 100)}%` : "0%",
+    width:
+      durationSec > 0
+        ? `${Math.min(100, (currentTimeSec / durationSec) * 100)}%`
+        : "0%",
     transition: "width 100ms linear",
   };
 
@@ -174,7 +192,14 @@ export default function TrackPlayer({ title, artistNames, albumImageUrl, preview
     <div>
       {/* Hidden native audio element for robust playback */}
       <audio ref={audioRef} playsInline />
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {albumImageUrl && (
             <img
@@ -182,12 +207,18 @@ export default function TrackPlayer({ title, artistNames, albumImageUrl, preview
               alt={title}
               width={64}
               height={64}
-              style={{ borderRadius: 12, objectFit: "cover", border: "1px solid rgba(255,255,255,0.08)" }}
-            />)
-          }
+              style={{
+                borderRadius: 12,
+                objectFit: "cover",
+                border: "1px solid rgba(255,255,255,0.08)",
+              }}
+            />
+          )}
           <div>
             <div style={{ fontSize: 12, color: "#9aa0a6" }}>{artistNames}</div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: "#f2f2f7" }}>{title}</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#f2f2f7" }}>
+              {title}
+            </div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -217,21 +248,59 @@ export default function TrackPlayer({ title, artistNames, albumImageUrl, preview
                   aria-hidden="true"
                 >
                   <circle cx="12" cy="12" r="10" fill="#1DB954" />
-                  <path d="M7.9 8.9c3.4-0.9 7.2-0.6 10.2 1" stroke="#0f1115" strokeWidth="1.6" strokeLinecap="round" fill="none" />
-                  <path d="M8.3 11.4c2.9-0.6 5.7-0.3 8.1 0.8" stroke="#0f1115" strokeWidth="1.6" strokeLinecap="round" fill="none" />
-                  <path d="M8.8 13.8c2.1-0.3 4-0.1 5.7 0.6" stroke="#0f1115" strokeWidth="1.6" strokeLinecap="round" fill="none" />
+                  <path
+                    d="M7 8c4-1 8.5-0.5 12 1.5"
+                    stroke="#0f1115"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    fill="none"
+                  />
+                  <path
+                    d="M7.5 11c3.5-0.8 7-0.4 10 1"
+                    stroke="#0f1115"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    fill="none"
+                  />
+                  <path
+                    d="M8 14c2.5-0.5 5-0.2 7 0.8"
+                    stroke="#0f1115"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    fill="none"
+                  />
                 </svg>
               </a>
             </div>
           )}
           {previewUrl ? (
             audioRef.current && !audioRef.current.paused ? (
-              <button onClick={handlePause} aria-label="Pause" style={controlPillBase}>❚❚</button>
+              <button
+                onClick={handlePause}
+                aria-label="Pause"
+                style={controlPillBase}
+              >
+                ❚❚
+              </button>
             ) : (
-              <button onClick={handleManualPlay} aria-label="Play" style={controlPillBase}>▶</button>
+              <button
+                onClick={handleManualPlay}
+                aria-label="Play"
+                style={controlPillBase}
+              >
+                ▶
+              </button>
             )
           ) : (
-            <div style={{ ...controlPillBase, opacity: 0.5, cursor: "not-allowed" }}>–</div>
+            <div
+              style={{
+                ...controlPillBase,
+                opacity: 0.5,
+                cursor: "not-allowed",
+              }}
+            >
+              –
+            </div>
           )}
         </div>
       </div>
@@ -243,19 +312,39 @@ export default function TrackPlayer({ title, artistNames, albumImageUrl, preview
           <div onClick={handleSeek} style={progressOuter}>
             <div style={progressInner} />
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, color: "#9aa0a6", fontSize: 12 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              marginTop: 6,
+              color: "#9aa0a6",
+              fontSize: 12,
+            }}
+          >
             <span>{formatTime(currentTimeSec)}</span>
             <span>{formatTime(durationSec)}</span>
           </div>
-          {autoplayError && <div style={{ marginTop: 6, color: "#f88", fontSize: 12 }}>(Autoplay blocked — click Play)</div>}
+          {autoplayError && (
+            <div style={{ marginTop: 6, color: "#f88", fontSize: 12 }}>
+              (Autoplay blocked — click Play)
+            </div>
+          )}
         </div>
       ) : (
-        <div style={{ color: "#888" }}>No 30s preview available for this track.</div>
+        <div style={{ color: "#888" }}>
+          No 30s preview available for this track.
+        </div>
       )}
-      <div style={{ marginTop: 32, color: "#9aa0a6", fontSize: 12, textAlign: "center" }}>[stems labs]</div>
-      
+      <div
+        style={{
+          marginTop: 32,
+          color: "#9aa0a6",
+          fontSize: 12,
+          textAlign: "center",
+        }}
+      >
+        [stems labs]
+      </div>
     </div>
   );
 }
-
-
