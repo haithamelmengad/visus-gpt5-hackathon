@@ -401,8 +401,13 @@ const VisualizerPage = (props: unknown) => {
   }, [recipe, analyser, fftArray, spotifyScalar]);
 
   if (error) return <div style={{ padding: 24, color: "red" }}>{error}</div>;
-  if (!track || !recipe)
-    return <div style={{ padding: 24 }}>Loading visualizer…</div>;
+  if (!track || !recipe) {
+    return (
+      <div style={{ padding: 24, color: "#9aa0a6" }}>
+        Analyzing track
+      </div>
+    );
+  }
 
   return (
     <div

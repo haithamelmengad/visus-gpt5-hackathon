@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import type { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import TrackPlayer from "@/components/TrackPlayer";
 import type { VisualizerRecipe } from "@/types/visualizer";
 
@@ -25,17 +26,20 @@ export default function TrackVisualClient(props: Props) {
     props.previewUrl ?? null
   );
   const [isPlaying, setIsPlaying] = useState(false);
-  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
-  const [fftArray, setFftArray] = useState<Uint8Array | null>(null);
+  // analyser/FFT are kept in refs to avoid rerenders
   // Keep latest analyser/FFT in refs so the render effect does not re-init
   const analyserLatestRef = useRef<AnalyserNode | null>(null);
   const fftLatestRef = useRef<Uint8Array | null>(null);
 
   // Data state
-  const [features, setFeatures] = useState<SpotifyFeatures | null>(null);
+  const [features] = useState<SpotifyFeatures | null>(null);
   const [recipe, setRecipe] = useState<VisualizerRecipe | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [meshyStatus, setMeshyStatus] = useState<string | null>(null);
+  const [meshyPrompt, setMeshyPrompt] = useState<string | null>(null);
+  const [phase, setPhase] = useState<
+    "analyzing" | "thinking" | "visualizing" | "creating"
+  >("analyzing");
 
   // Three.js refs
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -78,7 +82,13 @@ export default function TrackVisualClient(props: Props) {
         });
         if (!r.ok) throw new Error(await r.text());
         const data = (await r.json()) as VisualizerRecipe;
-        if (!aborted) setRecipe(data);
+        if (!aborted) {
+          setRecipe(data);
+          setPhase("thinking");
+          // Use seed as provisional idea text until Meshy prompt is available
+          const seed = (data?.seed || data?.concept || "").toString();
+          if (seed) setMeshyPrompt(seed);
+        }
       } catch (e) {
         if (!aborted)
           setError(e instanceof Error ? e.message : "Failed to get recipe");
@@ -88,7 +98,7 @@ export default function TrackVisualClient(props: Props) {
     return () => {
       aborted = true;
     };
-  }, [props.spotifyId]);
+  }, [props.spotifyId, props.title, props.artistNames]);
 
   // // Fetch Spotify audio features used by recipe weights
   // useEffect(() => {
@@ -130,10 +140,8 @@ export default function TrackVisualClient(props: Props) {
 
   // Receive analyser from the TrackPlayer to avoid duplicate audio contexts
   const handleAnalyserReady = (node: AnalyserNode) => {
-    setAnalyser(node);
     try {
       const arr = new Uint8Array(node.frequencyBinCount);
-      setFftArray(arr);
       analyserLatestRef.current = node;
       fftLatestRef.current = arr;
     } catch {}
@@ -201,8 +209,8 @@ export default function TrackVisualClient(props: Props) {
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
     dirLight.position.set(5, 5, 5);
     const amb = new THREE.AmbientLight(0xffffff, 0.5);
-    (dirLight as any).isLight = true;
-    (amb as any).isLight = true;
+    (dirLight as THREE.DirectionalLight & { isLight?: boolean }).isLight = true;
+    (amb as THREE.AmbientLight & { isLight?: boolean }).isLight = true;
     scene.add(amb);
     scene.add(dirLight);
 
@@ -305,7 +313,9 @@ export default function TrackVisualClient(props: Props) {
           "false";
         if (!enable) return;
 
-        console.log(`[CLIENT] Requesting Meshy prompt/model for track ID: ${props.spotifyId}`);
+        console.log(
+          `[CLIENT] Requesting Meshy prompt/model for track ID: ${props.spotifyId}`
+        );
 
         // First ask for cached modelUrl/prompt
         const promptRes = await fetch(`/api/visualizer/meshy`, {
@@ -323,18 +333,27 @@ export default function TrackVisualClient(props: Props) {
           return;
         }
 
-        const promptJson = (await promptRes.json()) as { prompt?: string; modelUrl?: string };
+        const promptJson = (await promptRes.json()) as {
+          prompt?: string;
+          modelUrl?: string;
+        };
         let modelUrl: string | null = null;
         if (promptJson.modelUrl) {
-          console.log(`[CLIENT] Using cached Meshy model URL: ${promptJson.modelUrl}`);
+          console.log(
+            `[CLIENT] Using cached Meshy model URL: ${promptJson.modelUrl}`
+          );
           modelUrl = promptJson.modelUrl;
+          setPhase("creating");
         }
+        if (promptJson.prompt) setMeshyPrompt(promptJson.prompt);
 
         let startJson: { id?: string } = {};
         if (!modelUrl) {
           if (!promptJson.prompt) return;
           const prompt = promptJson.prompt;
-          console.log(`[CLIENT] Starting Meshy 3D generation with prompt: "${prompt}"`);
+          console.log(
+            `[CLIENT] Starting Meshy 3D generation with prompt: "${prompt}"`
+          );
 
           const startRes = await fetch(`/api/visualizer/meshy/start`, {
             method: "POST",
@@ -344,47 +363,95 @@ export default function TrackVisualClient(props: Props) {
 
           if (!startRes.ok) {
             const txt = await startRes.text();
-            console.log(`[CLIENT] Meshy start error: ${startRes.status} - ${txt}`);
+            console.log(
+              `[CLIENT] Meshy start error: ${startRes.status} - ${txt}`
+            );
             setMeshyStatus(`meshy start error: ${startRes.status}`);
             console.warn("meshy start error", txt);
             return;
           }
 
           startJson = (await startRes.json()) as { id?: string };
-          console.log(`[CLIENT] Meshy generation started with ID: ${startJson.id}`);
+          console.log(
+            `[CLIENT] Meshy generation started with ID: ${startJson.id}`
+          );
           if (!startJson.id) return;
+          setPhase("visualizing");
         }
 
-        const pickModelUrl = (j: any): string | null => {
-          if (typeof j?.model_url === "string") return j.model_url as string;
-          if (typeof j?.modelUrl === "string") return j.modelUrl as string;
-          const tryModelUrls = (obj: any): string | null => {
+        type MeshyAsset = {
+          url?: string;
+          format?: string;
+          type?: string;
+          mimeType?: string;
+        };
+        type MeshyStatus = {
+          status?: string;
+          model_url?: string;
+          modelUrl?: string;
+          model_urls?: {
+            glb?: string;
+            GLB?: string;
+            gltf?: string;
+            GLTF?: string;
+          } | null;
+          modelUrls?: {
+            glb?: string;
+            GLB?: string;
+            gltf?: string;
+            GLTF?: string;
+          } | null;
+          assets?: MeshyAsset[] | null;
+          files?: MeshyAsset[] | null;
+        };
+        const pickModelUrl = (j: MeshyStatus): string | null => {
+          if (typeof j?.model_url === "string") return j.model_url;
+          if (typeof j?.modelUrl === "string") return j.modelUrl;
+          const tryModelUrls = (obj: unknown): string | null => {
             if (!obj || typeof obj !== "object") return null;
-            const glb = (obj as any).glb ?? (obj as any).GLB;
-            const gltf = (obj as any).gltf ?? (obj as any).GLTF;
-            if (typeof glb === "string") return glb;
-            if (typeof gltf === "string") return gltf;
-            return null;
+            const o = obj as {
+              glb?: unknown;
+              GLB?: unknown;
+              gltf?: unknown;
+              GLTF?: unknown;
+            };
+            const glb =
+              typeof o.glb === "string"
+                ? o.glb
+                : typeof o.GLB === "string"
+                ? (o.GLB as string)
+                : null;
+            const gltf =
+              typeof o.gltf === "string"
+                ? o.gltf
+                : typeof o.GLTF === "string"
+                ? (o.GLTF as string)
+                : null;
+            return glb || gltf || null;
           };
-          const direct = tryModelUrls(j.model_urls) || tryModelUrls(j.modelUrls);
+          const direct =
+            tryModelUrls(j.model_urls) || tryModelUrls(j.modelUrls);
           if (direct) return direct;
-          const fromAssets = (arr: any[]): string | null => {
+          const fromAssets = (arr: MeshyAsset[]): string | null => {
             for (const a of arr) {
-              const url = typeof a?.url === "string" ? (a.url as string) : null;
-              const format = (a?.format ?? a?.type ?? a?.mimeType ?? "").toString().toLowerCase();
-              if (url && (url.endsWith(".glb") || url.endsWith(".gltf"))) return url;
-              if (url && (format.includes("glb") || format.includes("gltf"))) return url;
+              const url = typeof a?.url === "string" ? a.url : null;
+              const format = (a?.format ?? a?.type ?? a?.mimeType ?? "")
+                .toString()
+                .toLowerCase();
+              if (url && (url.endsWith(".glb") || url.endsWith(".gltf")))
+                return url;
+              if (url && (format.includes("glb") || format.includes("gltf")))
+                return url;
             }
-            // fallback: first url string
             const anyUrl = arr.find((a) => typeof a?.url === "string");
             return anyUrl?.url ?? null;
           };
-          if (Array.isArray((j as any).assets)) {
-            const u = fromAssets((j as any).assets);
+          if (Array.isArray(j.assets)) {
+            const u = fromAssets(j.assets);
             if (u) return u;
           }
-          if (Array.isArray((j as any).files)) {
-            const u = fromAssets((j as any).files);
+          if (Array.isArray(j.files)) {
+            const u = fromAssets(j.files);
             if (u) return u;
           }
           return null;
@@ -398,7 +465,7 @@ export default function TrackVisualClient(props: Props) {
             { cache: "no-store" }
           );
           if (!s.ok) continue;
-          const j = (await s.json()) as any;
+          const j = (await s.json()) as MeshyStatus;
           setMeshyStatus(`meshy status: ${j.status ?? "pending"}`);
           const picked = pickModelUrl(j);
           if (picked) {
@@ -415,12 +482,19 @@ export default function TrackVisualClient(props: Props) {
           modelUrl!
         )}`;
         // Always dispose and replace the loader to avoid parallel loads adding twice
-        try { (gltfLoaderRef.current as any).manager?.itemEnd?.(proxiedUrl); } catch {}
+        try {
+          const anyLoader = gltfLoaderRef.current as unknown as {
+            manager?: { itemEnd?: (u: string) => void };
+          };
+          anyLoader.manager?.itemEnd?.(proxiedUrl);
+        } catch {}
         gltfLoaderRef.current = new GLTFLoader();
-        const gltf = await new Promise<any>((resolve, reject) => {
+        setPhase("creating");
+        const gltf = await new Promise<GLTF>((resolve, reject) => {
           gltfLoaderRef.current!.load(proxiedUrl, resolve, undefined, reject);
         });
-        const root: THREE.Group = gltf.scene || gltf.scenes?.[0];
+        const root: THREE.Group =
+          (gltf.scene as THREE.Group) || (gltf.scenes?.[0] as THREE.Group);
         if (!root) return;
         // Ensure only one model: clear the model group entirely before adding
         try {
@@ -428,12 +502,17 @@ export default function TrackVisualClient(props: Props) {
           const children = [...group.children];
           for (const child of children) {
             group.remove(child);
-            child.traverse((node) => {
-              const m = node as any;
-              if (m.isMesh) {
-                m.geometry?.dispose?.();
-                if (Array.isArray(m.material)) m.material.forEach((mm: any) => mm?.dispose?.());
-                else m.material?.dispose?.();
+            child.traverse((node: THREE.Object3D) => {
+              const meshNode = node as THREE.Object3D & { isMesh?: boolean };
+              if (meshNode.isMesh) {
+                const realMesh = meshNode as unknown as THREE.Mesh;
+                realMesh.geometry?.dispose?.();
+                const mat = realMesh.material as
+                  | THREE.Material
+                  | THREE.Material[]
+                  | undefined;
+                if (Array.isArray(mat)) mat.forEach((mm) => mm?.dispose?.());
+                else mat?.dispose?.();
               }
             });
           }
@@ -452,11 +531,10 @@ export default function TrackVisualClient(props: Props) {
         root.scale.multiplyScalar(scalar);
         baseScaleRef.current = root.scale.x;
         // Apply our shader to every mesh so displacement still works
-        root.traverse((obj) => {
-          const m = obj as any;
-          if (m.isMesh) {
-            m.material = material;
-            m.geometry.computeVertexNormals?.();
+        root.traverse((obj: THREE.Object3D) => {
+          if (obj instanceof THREE.Mesh) {
+            obj.material = material;
+            obj.geometry.computeVertexNormals?.();
           }
         });
         // Add the GLTF root into the dedicated model group
@@ -467,8 +545,7 @@ export default function TrackVisualClient(props: Props) {
       } catch {
         // ignore and keep fallback primitive
         setMeshyStatus((prev) => prev ?? "meshy failed — using fallback");
-      }
-      finally {
+      } finally {
         modelLoadInProgressRef.current = false;
       }
     };
@@ -491,7 +568,7 @@ export default function TrackVisualClient(props: Props) {
       if (!isPointerDown) return;
       const dx = (e.clientX - lastX) * 0.005;
       const dy = (e.clientY - lastY) * 0.005;
-        const obj = currentObjectRef.current;
+      const obj = currentObjectRef.current;
       if (!obj) return;
       obj.rotation.y += dx;
       obj.rotation.x += dy;
@@ -538,7 +615,9 @@ export default function TrackVisualClient(props: Props) {
         const mid = (fft as Uint8Array)[midIdx] ?? 0;
         const high = (fft as Uint8Array)[highIdx] ?? 0;
         const energy = (low + mid + high) / (3 * 255);
-        const baseAmp = (recipe.deformation as any)?.amplitude ?? 0.3;
+        const baseAmp =
+          (recipe.deformation as { amplitude?: number } | undefined)
+            ?.amplitude ?? 0.3;
         const combined = 0.55 * energy + 0.45 * spotifyScalar;
         uniforms.u_amplitude.value = baseAmp * combined;
 
@@ -597,7 +676,97 @@ export default function TrackVisualClient(props: Props) {
       } catch {}
       canvasRef.current = null;
     };
-  }, [recipe]);
+  }, [recipe, spotifyScalar, props.spotifyId]);
+
+  // Loading shimmer effect for 3-character sweep across the message
+  const ShimmerText = ({ text }: { text: string }) => {
+    const [idx, setIdx] = useState(0);
+    const [dir, setDir] = useState<1 | -1>(1);
+    const width = 3; // highlight width in characters
+    useEffect(() => {
+      const interval = setInterval(() => {
+        setIdx((prev) => {
+          const next = prev + dir;
+          if (next < 0) {
+            setDir(1);
+            return 0;
+          }
+          if (next > Math.max(0, text.length - width)) {
+            setDir(-1);
+            return Math.max(0, text.length - width);
+          }
+          return next;
+        });
+      }, 90);
+      return () => clearInterval(interval);
+    }, [text, dir]);
+
+    const start = Math.min(idx, Math.max(0, text.length - width));
+    const end = Math.min(text.length, start + width);
+    const left = text.slice(0, start);
+    const mid = text.slice(start, end);
+    const right = text.slice(end);
+    return (
+      <span style={{ fontWeight: 600, letterSpacing: 0.3 }}>
+        <span style={{ color: "#9aa0a6" }}>{left}</span>
+        <span
+          style={{
+            backgroundImage:
+              "linear-gradient(90deg, rgba(255,255,255,0.25), rgba(255,255,255,0.95), rgba(255,255,255,0.25))",
+            WebkitBackgroundClip: "text",
+            backgroundClip: "text",
+            color: "transparent",
+            textShadow: "0 0 18px rgba(255,255,255,0.15)",
+          }}
+        >
+          {mid}
+        </span>
+        <span style={{ color: "#9aa0a6" }}>{right}</span>
+      </span>
+    );
+  };
+
+  const currentLoadingMessage = useMemo(() => {
+    if (phase === "analyzing") return "Analyzing track";
+    if (phase === "thinking") {
+      const prompt = (meshyPrompt || "thinking of ideas").toString();
+      return `Thinking of ideas — ${prompt}`;
+    }
+    if (phase === "visualizing") return "Visualizing";
+    return "Creating scene";
+  }, [phase, meshyPrompt]);
+
+  const humanizeMeshyStatus = (status: string | null): string | null => {
+    if (!status) return null;
+    const raw = status.trim();
+    const s = raw.toLowerCase();
+    if (
+      s.includes("in_progress") ||
+      s.includes("progress") ||
+      s.includes("processing")
+    ) {
+      return "Creating 3D asset";
+    }
+    if (
+      s.includes("queued") ||
+      s.includes("in_queue") ||
+      s.includes("pending")
+    ) {
+      return "Preparing 3D asset";
+    }
+    if (
+      s.includes("success") ||
+      s.includes("succeeded") ||
+      s.includes("completed")
+    ) {
+      return null;
+    }
+    if (s.includes("fail") || s.includes("cancel")) {
+      return "3D asset generation failed";
+    }
+    // For any non-standard string, just show it as-is (already user-friendly)
+    return raw;
+  };
 
   if (error) {
     return (
@@ -615,7 +784,14 @@ export default function TrackVisualClient(props: Props) {
 
   if (!modelReady) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", height: "100vh", minHeight: 0 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          height: "100vh",
+          minHeight: 0,
+        }}
+      >
         {/* 3D Visualizer Area - Top */}
         <div
           ref={containerRef}
@@ -623,7 +799,8 @@ export default function TrackVisualClient(props: Props) {
             flex: 1,
             width: "100%",
             position: "relative",
-            background: "radial-gradient(60% 60% at 50% 20%, rgba(80,38,125,0.45) 0%, rgba(18,12,24,0.85) 48%, #07070a 100%)",
+            background:
+              "radial-gradient(60% 60% at 50% 20%, rgba(80,38,125,0.45) 0%, rgba(18,12,24,0.85) 48%, #07070a 100%)",
             overflow: "hidden",
           }}
         >
@@ -639,26 +816,34 @@ export default function TrackVisualClient(props: Props) {
           >
             <div
               style={{
-                color: "#9aa0a6",
+                color: "#cfd3da",
                 textAlign: "center",
-                padding: "14px 18px",
-                background: "rgba(14,14,18,0.5)",
-                borderRadius: "12px",
-                border: "1px solid rgba(255,255,255,0.08)",
+                maxWidth: 880,
+                width: "100%",
+                padding: "0 16px",
               }}
             >
-              Loading visualizer...
+              <div style={{ fontSize: 20, lineHeight: 1.25 }}>
+                <ShimmerText text={currentLoadingMessage} />
+              </div>
+              {humanizeMeshyStatus(meshyStatus) && (
+                <div style={{ marginTop: 8, fontSize: 14, opacity: 0.85 }}>
+                  {humanizeMeshyStatus(meshyStatus)}
+                </div>
+              )}
             </div>
           </div>
         </div>
-        
+
         {/* Music Player - Bottom */}
-        <div style={{ 
-          padding: "24px", 
-          background: "rgba(14,14,18,0.94)",
-          display: "flex",
-          justifyContent: "center"
-        }}>
+        <div
+          style={{
+            padding: "24px",
+            background: "rgba(14,14,18,0.94)",
+            display: "flex",
+            justifyContent: "center",
+          }}
+        >
           <div style={{ maxWidth: "500px", width: "100%" }}>
             <TrackPlayer
               {...props}
@@ -673,7 +858,14 @@ export default function TrackVisualClient(props: Props) {
   }
 
   return (
-      <div style={{ display: "flex", flexDirection: "column", height: "100vh", minHeight: 0 }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100vh",
+        minHeight: 0,
+      }}
+    >
       {/* 3D Visualizer Area - Top */}
       <div
         ref={containerRef}
@@ -681,7 +873,8 @@ export default function TrackVisualClient(props: Props) {
           flex: 1,
           width: "100%",
           position: "relative",
-          background: "radial-gradient(60% 60% at 50% 20%, rgba(80,38,125,0.45) 0%, rgba(18,12,24,0.85) 48%, #07070a 100%)",
+          background:
+            "radial-gradient(60% 60% at 50% 20%, rgba(80,38,125,0.45) 0%, rgba(18,12,24,0.85) 48%, #07070a 100%)",
         }}
       >
         <canvas
@@ -695,14 +888,16 @@ export default function TrackVisualClient(props: Props) {
           }}
         />
       </div>
-      
+
       {/* Music Player - Bottom */}
-      <div style={{ 
-        padding: "24px", 
-        background: "rgba(14,14,18,0.94)",
-        display: "flex",
-        justifyContent: "center"
-      }}>
+      <div
+        style={{
+          padding: "24px",
+          background: "rgba(14,14,18,0.94)",
+          display: "flex",
+          justifyContent: "center",
+        }}
+      >
         <div style={{ maxWidth: "500px", width: "100%" }}>
           <TrackPlayer
             {...props}
