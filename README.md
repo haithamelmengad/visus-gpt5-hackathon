@@ -7,11 +7,19 @@
 - A Spotify Developer application (Client ID and Client Secret)
 - A random `NEXTAUTH_SECRET`
 
-### One‑time Spotify setup
-1. Go to the Spotify Developer Dashboard and create an app. https://developer.spotify.com/
-2. Add the redirect URI: `http://localhost:3000/api/auth/callback/spotify`.
-3. Copy the Client ID and Client Secret.
+### Spotify setup
+- Go to the Spotify Developer Dashboard and create an app. https://developer.spotify.com/
+- Add the redirect URI: `http://localhost:3000/api/auth/callback/spotify`.
+- Copy the Client ID and Client Secret.
 
+### OpenAI setup
+- Create an OpenAI account if you don't have one already. https://platform.openai.com/
+- Generate an API key
+
+### Meshy setup
+- Create a Meshy account. https://www.meshy.ai/discover
+- Create an API key https://www.meshy.ai/settings/api
+  
 ### Quickstart (Humans)
 1. Open a terminal at the repo root and move into the web app:
    ```bash
@@ -23,6 +31,9 @@
    SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
    NEXTAUTH_SECRET=your_random_string # e.g. `openssl rand -base64 32`
    NEXTAUTH_URL=http://localhost:3000
+   OPENAI_API_KEY=your_openai_api_key
+   OPENAI_MODEL=gpt5
+   MESHY_API_KEY=your_meshy_api_key
    ```
 3. Install and run the dev server:
    ```bash
