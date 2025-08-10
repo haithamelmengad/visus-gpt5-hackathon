@@ -2,11 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { formatTime, BUTTONS } from "@/lib/styles";
-import {
-  createAudioContext,
-  createAnalyser,
-  processFFTData,
-} from "@/lib/audio";
+import { createAudioContext, createAnalyser } from "@/lib/audio";
 
 type Props = {
   title: string;

@@ -126,10 +126,12 @@ export async function POST(req: Request) {
       return v;
     };
     const model = normalizeModel(process.env.OPENAI_MODEL);
-    
-    console.log(`[MESHY] Generating prompt for track: ${fullContext.core.title} by ${fullContext.core.artist}`);
+
+    console.log(
+      `[MESHY] Generating prompt for track: ${fullContext.core.title} by ${fullContext.core.artist}`
+    );
     console.log(`[MESHY] Using model: ${model}`);
-    
+
     // Cache the generated prompt by spotifyId so we reuse the same Meshy prompt across sessions
     const completion = await cacheGetOrSet(
       `meshy:prompt:${spotifyId}:analysis:${includeAnalysis ? 1 : 0}`,
@@ -144,13 +146,15 @@ export async function POST(req: Request) {
           response_format: { type: "text" } as any,
         })
     );
-    
+
     let prompt = (completion.choices[0]?.message?.content || "").trim();
     // Ensure the primary artist name is present first and condense words after the dash
     const firstArtist = (fullContext.core.artist || "").split(",")[0]?.trim();
     if (firstArtist) {
       const escaped = firstArtist.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
-      const startsWithArtist = new RegExp(`^\n?\s*${escaped}\\b`, "i").test(prompt);
+      const startsWithArtist = new RegExp(`^\n?\s*${escaped}\\b`, "i").test(
+        prompt
+      );
       if (!startsWithArtist) {
         const trailingArtist = new RegExp(`\n?\s*—\s*${escaped}\s*$`, "i");
         prompt = prompt.replace(trailingArtist, "").trim();
@@ -160,10 +164,14 @@ export async function POST(req: Request) {
       // Condense the phrase after the dash to 2-4 tokens without punctuation
       const parts = prompt.split(/—|--|\u2014/);
       let after = parts.length > 1 ? parts.slice(1).join(" ") : prompt;
-      after = after.replace(/[.,;:!?"'()\[\]{}]/g, " ")
-                   .replace(/\s+/g, " ")
-                   .trim();
-      const maxWords = Math.max(2, Math.min(4, parseInt(process.env.MESHY_PROMPT_WORDS || "3", 10)));
+      after = after
+        .replace(/[.,;:!?"'()\[\]{}]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const maxWords = Math.max(
+        2,
+        Math.min(4, parseInt(process.env.MESHY_PROMPT_WORDS || "3", 10))
+      );
       const words = after.split(" ").filter(Boolean).slice(0, maxWords);
       if (words.length > 0) {
         prompt = `${firstArtist} — ${words.join(" ")}`.trim();
@@ -171,11 +179,11 @@ export async function POST(req: Request) {
         prompt = `${firstArtist} — iconic object`;
       }
     }
-    
+
     console.log(`[MESHY] OpenAI response for "${fullContext.core.title}":`);
     console.log(`[MESHY] Generated prompt: "${prompt}"`);
     console.log(`[MESHY] Prompt length: ${prompt.length} characters`);
-    
+
     return NextResponse.json({ prompt });
   } catch (e: unknown) {
     const prompt = `abstract music note, glossy midnight blue plastic, minimal — single object, no scene, neutral lighting`;
@@ -185,4 +193,3 @@ export async function POST(req: Request) {
     });
   }
 }
-

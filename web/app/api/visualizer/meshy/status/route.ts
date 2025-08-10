@@ -102,11 +102,11 @@ export async function GET(req: Request) {
           jsonObj.texture_richness
         );
       }
-      
+
       // Check for MTL file URL which contains material color information
-      if (jsonObj.model_urls && typeof jsonObj.model_urls === 'object') {
+      if (jsonObj.model_urls && typeof jsonObj.model_urls === "object") {
         const modelUrls = jsonObj.model_urls as Record<string, unknown>;
-        if (modelUrls.mtl && typeof modelUrls.mtl === 'string') {
+        if (modelUrls.mtl && typeof modelUrls.mtl === "string") {
           console.log(`[MESHY STATUS] MTL file URL found:`, modelUrls.mtl);
         }
       }
