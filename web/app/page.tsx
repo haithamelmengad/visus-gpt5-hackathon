@@ -1,6 +1,7 @@
 "use client";
 
 import { signIn, signOut, useSession } from "next-auth/react";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import TrackListSkeleton from "@/components/TrackListSkeleton";
 import LoginSkeleton from "@/components/LoginSkeleton";
@@ -269,7 +270,7 @@ export default function Home() {
                   key={`${item.track.id}-${item.played_at}`}
                   style={{ marginBottom: 6 }}
                 >
-                  <a
+                  <Link
                     href={href}
                     onMouseEnter={() => setHoverIdx(idx)}
                     onMouseLeave={() =>
@@ -322,7 +323,7 @@ export default function Home() {
                       </div>
                       <div style={rightPill}>▶</div>
                     </div>
-                  </a>
+                  </Link>
                 </li>
               );
             })}
