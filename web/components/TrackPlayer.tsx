@@ -82,8 +82,8 @@ export default function TrackPlayer({ title, artistNames, albumImageUrl, preview
         audioCtxRef.current = ctx;
         const source = ctx.createMediaElementSource(audio);
         const analyser = ctx.createAnalyser();
-        analyser.fftSize = 512;
-        analyser.smoothingTimeConstant = 0.8;
+        analyser.fftSize = 1024; // Larger FFT for smoother frequency resolution
+        analyser.smoothingTimeConstant = 0.9; // Higher smoothing for more uniform data
         source.connect(analyser);
         analyser.connect(ctx.destination);
         analyserRef.current = analyser;

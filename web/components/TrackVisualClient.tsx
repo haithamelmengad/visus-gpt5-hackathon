@@ -20,6 +20,87 @@ type Props = {
 
 type SpotifyFeatures = Record<string, number | string | null | undefined>;
 
+// Function to extract dominant colors from an image
+const extractDominantColors = async (
+  imageUrl: string
+): Promise<THREE.Color[]> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        resolve([new THREE.Color(0x9c27b0)]); // Fallback purple
+        return;
+      }
+
+      // Scale down for performance
+      const scale = 0.1;
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+
+      // Simple color clustering
+      const colors: { r: number; g: number; b: number; count: number }[] = [];
+      const tolerance = 30; // Color similarity threshold
+
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+
+        // Skip very dark or very light pixels
+        const brightness = (r + g + b) / 3;
+        if (brightness < 30 || brightness > 225) continue;
+
+        let found = false;
+        for (const color of colors) {
+          const dr = Math.abs(r - color.r);
+          const dg = Math.abs(g - color.g);
+          const db = Math.abs(b - color.b);
+
+          if (dr + dg + db < tolerance) {
+            color.count++;
+            found = true;
+            break;
+          }
+        }
+
+        if (!found) {
+          colors.push({ r, g, b, count: 1 });
+        }
+      }
+
+      // Sort by frequency and take top colors
+      colors.sort((a, b) => b.count - a.count);
+      const dominantColors = colors
+        .slice(0, 5)
+        .map(
+          (color) =>
+            new THREE.Color(color.r / 255, color.g / 255, color.b / 255)
+        );
+
+      if (dominantColors.length === 0) {
+        dominantColors.push(new THREE.Color(0x9c27b0)); // Fallback
+      }
+
+      resolve(dominantColors);
+    };
+
+    img.onerror = () => {
+      resolve([new THREE.Color(0x9c27b0)]); // Fallback on error
+    };
+
+    img.src = imageUrl;
+  });
+};
+
 export default function TrackVisualClient(props: Props) {
   // Audio/preview state
   const [resolvedPreviewUrl, setResolvedPreviewUrl] = useState<string | null>(
@@ -58,9 +139,25 @@ export default function TrackVisualClient(props: Props) {
   const baseScaleRef = useRef<number>(1);
   const isPlayingRef = useRef<boolean>(false);
 
+  // Smoothing refs for FFT data to reduce spiky distortion
+  const lastLowRef = useRef<number>(0);
+  const lastMidRef = useRef<number>(0);
+  const lastHighRef = useRef<number>(0);
+  const lastEnergyRef = useRef<number>(0);
+
+  // Store dominant colors from album cover
+  const [dominantColors, setDominantColors] = useState<THREE.Color[]>([]);
+
   useEffect(() => {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
+
+  // Extract dominant colors from album cover when available
+  useEffect(() => {
+    if (props.albumImageUrl) {
+      extractDominantColors(props.albumImageUrl).then(setDominantColors);
+    }
+  }, [props.albumImageUrl]);
 
   // Fetch full recipe
   useEffect(() => {
@@ -200,19 +297,44 @@ export default function TrackVisualClient(props: Props) {
     });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.4; // Increased for better color vibrancy
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.autoUpdate = true;
     if (!canvasRef.current) {
       container.appendChild(renderer.domElement);
       canvasRef.current = renderer.domElement;
     }
 
-    // lights (tag for identification)
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-    dirLight.position.set(5, 5, 5);
-    const amb = new THREE.AmbientLight(0xffffff, 0.5);
-    (dirLight as THREE.DirectionalLight & { isLight?: boolean }).isLight = true;
-    (amb as THREE.AmbientLight & { isLight?: boolean }).isLight = true;
-    scene.add(amb);
-    scene.add(dirLight);
+    // Enhanced lighting for better color vibrancy and contrast
+    const enhancedDirLight = new THREE.DirectionalLight(0xffffff, 2.0);
+    enhancedDirLight.position.set(8, 12, 8);
+    enhancedDirLight.castShadow = true;
+    enhancedDirLight.shadow.mapSize.width = 2048;
+    enhancedDirLight.shadow.mapSize.height = 2048;
+    enhancedDirLight.shadow.camera.near = 0.5;
+    enhancedDirLight.shadow.camera.far = 50;
+
+    const enhancedAmb = new THREE.AmbientLight(0xffffff, 0.8);
+    const rimLight = new THREE.DirectionalLight(0x4a90e2, 1.2); // Blue rim light for contrast
+    rimLight.position.set(-5, 3, -5);
+    const fillLight = new THREE.DirectionalLight(0xffd700, 0.6); // Warm fill light
+    fillLight.position.set(3, 2, 3);
+
+    (
+      enhancedDirLight as THREE.DirectionalLight & { isLight?: boolean }
+    ).isLight = true;
+    (enhancedAmb as THREE.AmbientLight & { isLight?: boolean }).isLight = true;
+    (rimLight as THREE.DirectionalLight & { isLight?: boolean }).isLight = true;
+    (fillLight as THREE.DirectionalLight & { isLight?: boolean }).isLight =
+      true;
+
+    scene.add(enhancedAmb);
+    scene.add(enhancedDirLight);
+    scene.add(rimLight);
+    scene.add(fillLight);
 
     // Create a dedicated group that will contain exactly one loaded model
     const modelGroup = new THREE.Group();
@@ -249,59 +371,272 @@ export default function TrackVisualClient(props: Props) {
     const r = parseInt(clean.slice(0, 2), 16) / 255;
     const g = parseInt(clean.slice(2, 4), 16) / 255;
     const b = parseInt(clean.slice(4, 6), 16) / 255;
-    const uniforms = {
-      u_time: { value: 0 },
-      u_amplitude: { value: 0 },
-      u_color: { value: new THREE.Vector3(r, g, b) },
-      u_lightDir: { value: new THREE.Vector3(0.5, 0.8, 0.6).normalize() },
-    };
-    const vertexShader = `
-      varying vec3 vNormal;
-      varying vec3 vPos;
-      uniform float u_time;
-      uniform float u_amplitude;
-      float hash(vec3 p){ p = fract(p*0.3183099+vec3(0.1,0.2,0.3)); p*=17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
-      float noise(vec3 p){
-        vec3 i=floor(p); vec3 f=fract(p); f=f*f*(3.0-2.0*f);
-        float n = mix(
-          mix(mix(hash(i+vec3(0,0,0)), hash(i+vec3(1,0,0)), f.x), mix(hash(i+vec3(0,1,0)), hash(i+vec3(1,1,0)), f.x), f.y),
-          mix(mix(hash(i+vec3(0,0,1)), hash(i+vec3(1,0,1)), f.x), mix(hash(i+vec3(0,1,1)), hash(i+vec3(1,1,1)), f.x), f.y),
-          f.z);
-        return n;
-      }
-      void main(){
-        vNormal = normalMatrix * normalize(normal);
-        vec3 pos = position;
-        float n = noise(normalize(position)*2.0 + vec3(0.0, u_time*0.25, 0.0));
-        float disp = (n-0.5)*2.0*u_amplitude;
-        pos += normalize(normal) * disp;
-        vPos = (modelViewMatrix * vec4(pos, 1.0)).xyz;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-      }
-    `;
-    const fragmentShader = `
-      precision mediump float;
-      varying vec3 vNormal; varying vec3 vPos;
-      uniform vec3 u_color; uniform vec3 u_lightDir;
-      void main(){
-        vec3 N = normalize(vNormal);
-        vec3 L = normalize(u_lightDir);
-        float lambert = max(dot(N, L), 0.0);
-        vec3 base = u_color;
-        vec3 col = base * (0.4 + 0.6 * lambert);
-        gl_FragColor = vec4(col, 1.0);
-      }
-    `;
-    const material = new THREE.ShaderMaterial({
-      uniforms,
-      vertexShader,
-      fragmentShader,
-      lights: false,
-    });
 
     // Defer adding any geometry until Meshy model is ready
 
     // If GPT selected a custom metaphor, try to replace the fallback primitive with a Meshy-generated model
+    // Function to apply color alteration and display a 3D model
+    const applyColorAlterationAndDisplay = async (
+      gltf: GLTF,
+      modelType: "preview" | "refined"
+    ) => {
+      try {
+        console.log(
+          `[CLIENT] 🎨 Applying color alteration to ${modelType} model...`
+        );
+
+        const root: THREE.Group =
+          (gltf.scene as THREE.Group) || (gltf.scenes?.[0] as THREE.Group);
+        if (!root) return;
+
+        // Ensure only one model: clear the model group entirely before adding
+        try {
+          const group = currentObjectRef.current as THREE.Group;
+          const children = [...group.children];
+          for (const child of children) {
+            group.remove(child);
+            child.traverse((node: THREE.Object3D) => {
+              const meshNode = node as THREE.Object3D & { isMesh?: boolean };
+              if (meshNode.isMesh) {
+                const realMesh = meshNode as unknown as THREE.Mesh;
+                realMesh.geometry?.dispose?.();
+                const mat = realMesh.material as
+                  | THREE.Material
+                  | THREE.Material[]
+                  | undefined;
+                if (Array.isArray(mat)) mat.forEach((mm) => mm?.dispose?.());
+                else mat?.dispose?.();
+              }
+            });
+          }
+        } catch {}
+
+        // Fit and center
+        const box = new THREE.Box3().setFromObject(root);
+        const size = new THREE.Vector3();
+        const center = new THREE.Vector3();
+        box.getSize(size);
+        box.getCenter(center);
+        root.position.sub(center);
+
+        // Scale to a comfortable on-screen size
+        const desiredMaxSize = 2.6;
+        const currentMaxSize = Math.max(1e-3, Math.max(size.x, size.y, size.z));
+        const scalar = desiredMaxSize / currentMaxSize;
+        root.scale.multiplyScalar(scalar);
+        baseScaleRef.current = root.scale.x;
+
+        // Apply color alteration based on album cover dominant color
+        root.traverse((obj: THREE.Object3D) => {
+          if (obj instanceof THREE.Mesh) {
+            const originalMaterial = obj.material;
+            console.log(
+              `[DEBUG] Processing ${modelType} mesh with material:`,
+              originalMaterial?.type
+            );
+
+            // Enhanced material enhancement system
+            const hasValidColor = (mat: THREE.Material): boolean => {
+              const m = mat as THREE.Material & {
+                color?: THREE.Color;
+                map?: THREE.Texture;
+              };
+              if (m.map) return true; // Has texture
+              if (m.color) {
+                const c = m.color;
+                return c.r > 0 || c.g > 0 || c.b > 0; // Has non-black color
+              }
+              return false;
+            };
+
+            const enhanceMaterial = (
+              material: THREE.Material,
+              meshName: string
+            ): THREE.Material => {
+              const enhanced = material.clone();
+
+              if (!hasValidColor(enhanced)) {
+                console.log(
+                  `[DEBUG] ${modelType} material lacks proper colors, enhancing with album cover colors...`
+                );
+
+                // Use album cover dominant colors if available, otherwise fallback to song-aware colors
+                const getBaseColor = (): THREE.Color => {
+                  if (dominantColors.length > 0) {
+                    // Use the most dominant color from album cover
+                    const primaryColor = dominantColors[0];
+                    console.log(
+                      `[DEBUG] Using album cover dominant color:`,
+                      primaryColor
+                    );
+                    return primaryColor;
+                  } else {
+                    // Fallback to song-aware colors
+                    const seed = `${props.title}${props.artistNames}`;
+                    let hash = 0;
+                    for (let i = 0; i < seed.length; i++) {
+                      hash =
+                        ((hash << 5) - hash + seed.charCodeAt(i)) & 0xffffffff;
+                    }
+                    const hue = (hash % 360) / 360;
+                    const saturation = 0.6 + ((hash >> 8) % 40) / 100;
+                    const lightness = 0.4 + ((hash >> 16) % 30) / 100;
+                    return new THREE.Color().setHSL(hue, saturation, lightness);
+                  }
+                };
+
+                const generateComplementaryColors = (
+                  baseColor: THREE.Color
+                ): THREE.Color[] => {
+                  const hsl = { h: 0, s: 0, l: 0 };
+                  baseColor.getHSL(hsl);
+                  const complementary = new THREE.Color().setHSL(
+                    (hsl.h + 0.5) % 1,
+                    hsl.s,
+                    hsl.l
+                  );
+                  const analogous1 = new THREE.Color().setHSL(
+                    (hsl.h + 0.083) % 1,
+                    hsl.s,
+                    hsl.l
+                  );
+                  const analogous2 = new THREE.Color().setHSL(
+                    (hsl.h - 0.083 + 1) % 1,
+                    hsl.s,
+                    hsl.l
+                  );
+                  return [complementary, analogous1, analogous2];
+                };
+
+                const baseColor = getBaseColor();
+                const complementaryColors =
+                  generateComplementaryColors(baseColor);
+
+                if (enhanced instanceof THREE.MeshStandardMaterial) {
+                  enhanced.color = baseColor;
+                  enhanced.emissive = complementaryColors[0]
+                    .clone()
+                    .multiplyScalar(0.1);
+                  enhanced.emissiveIntensity = 0.2;
+
+                  const titleHash = props.title
+                    .split("")
+                    .reduce((a, b) => a + b.charCodeAt(0), 0);
+                  enhanced.metalness = 0.1 + (titleHash % 60) / 100;
+                  enhanced.roughness = 0.2 + (titleHash % 50) / 100;
+                  enhanced.vertexColors = true;
+
+                  // Create vertex colors for subtle variation
+                  if (
+                    obj instanceof THREE.Mesh &&
+                    obj.geometry.attributes.position
+                  ) {
+                    const positions = obj.geometry.attributes.position.array;
+                    const colors = new Float32Array(positions.length);
+
+                    for (let i = 0; i < positions.length; i += 3) {
+                      const x = positions[i];
+                      const y = positions[i + 1];
+                      const z = positions[i + 2];
+                      const noise =
+                        Math.sin(x * 2) * Math.cos(y * 3) * Math.sin(z * 4);
+                      const colorVariation = 0.1;
+
+                      colors[i] = baseColor.r + noise * colorVariation;
+                      colors[i + 1] = baseColor.g + noise * colorVariation;
+                      colors[i + 2] = baseColor.b + noise * colorVariation;
+                    }
+
+                    obj.geometry.setAttribute(
+                      "color",
+                      new THREE.BufferAttribute(colors, 3)
+                    );
+                  }
+                }
+              }
+
+              return enhanced;
+            };
+
+            if (Array.isArray(originalMaterial)) {
+              obj.material = originalMaterial.map((mat, index) =>
+                enhanceMaterial(mat, `${obj.name || "unknown"}_${index}`)
+              );
+            } else if (originalMaterial) {
+              obj.material = enhanceMaterial(
+                originalMaterial,
+                obj.name || "unknown"
+              );
+            }
+          }
+        });
+
+        // Add the enhanced model to the scene
+        if (currentObjectRef.current) {
+          currentObjectRef.current.add(root);
+          setModelReady(true);
+          console.log(
+            `[CLIENT] ✅ ${modelType.toUpperCase()} model added to scene with color alteration!`
+          );
+        }
+      } catch (error) {
+        console.error(
+          `[CLIENT] Error applying color alteration to ${modelType} model:`,
+          error
+        );
+      }
+    };
+
+    // Function to load and display a 3D model with color alteration
+    const loadAndDisplayModel = async (
+      modelUrl: string,
+      modelType: "preview" | "refined"
+    ) => {
+      try {
+        console.log(`[CLIENT] 🎨 Loading ${modelType} model: ${modelUrl}`);
+
+        if (!gltfLoaderRef.current) gltfLoaderRef.current = new GLTFLoader();
+        const proxiedUrl = `/api/visualizer/meshy/fetch?url=${encodeURIComponent(
+          modelUrl
+        )}`;
+        console.log(`[CLIENT] Proxied URL for loading: ${proxiedUrl}`);
+
+        // Always dispose and replace the loader to avoid parallel loads
+        try {
+          const anyLoader = gltfLoaderRef.current as unknown as {
+            manager?: { itemEnd?: (u: string) => void };
+          };
+          anyLoader.manager?.itemEnd?.(proxiedUrl);
+        } catch {}
+        gltfLoaderRef.current = new GLTFLoader();
+
+        setPhase("creating");
+        setMeshyStatus(`loading ${modelType} 3D model...`);
+
+        console.log(`[CLIENT] Starting GLTF load for ${modelType} model...`);
+        const gltf = await new Promise<GLTF>((resolve, reject) => {
+          gltfLoaderRef.current!.load(proxiedUrl, resolve, undefined, reject);
+        });
+
+        console.log(`[DEBUG] GLTF loaded for ${modelType}:`, gltf);
+        console.log(`[DEBUG] GLTF scene:`, gltf.scene);
+        console.log(
+          `[DEBUG] GLTF scene children count:`,
+          gltf.scene.children.length
+        );
+
+        // Apply color alteration and display the model
+        await applyColorAlterationAndDisplay(gltf, modelType);
+
+        console.log(
+          `[CLIENT] ✅ ${modelType.toUpperCase()} model loaded and displayed successfully!`
+        );
+      } catch (error) {
+        console.error(`[CLIENT] Error loading ${modelType} model:`, error);
+        setMeshyStatus(`error loading ${modelType} model`);
+      }
+    };
+
     const tryLoadMeshyModel = async () => {
       try {
         if (!props.spotifyId) return;
@@ -338,46 +673,68 @@ export default function TrackVisualClient(props: Props) {
           modelUrl?: string;
         };
         let modelUrl: string | null = null;
+        let previewModelUrl: string | null = null;
+
+        // Always go through the two-stage workflow for better quality
+        // Even if we have a cached model, we'll try to refine it
         if (promptJson.modelUrl) {
           console.log(
-            `[CLIENT] Using cached Meshy model URL: ${promptJson.modelUrl}`
+            `[CLIENT] Found cached model URL, but proceeding with preview+refine workflow for better quality: ${promptJson.modelUrl}`
           );
-          modelUrl = promptJson.modelUrl;
-          setPhase("creating");
+          console.log(
+            `[CLIENT] Storing cached URL as fallback: ${promptJson.modelUrl}`
+          );
+          // Store the cached URL as a potential fallback
+          previewModelUrl = promptJson.modelUrl;
+        } else {
+          console.log(
+            `[CLIENT] No cached model URL found, will generate from scratch`
+          );
         }
+
         if (promptJson.prompt) setMeshyPrompt(promptJson.prompt);
 
-        let startJson: { id?: string } = {};
-        if (!modelUrl) {
-          if (!promptJson.prompt) return;
-          const prompt = promptJson.prompt;
+        let startJson: { id?: string; mode?: string; previewId?: string } = {};
+        let previewGenerationId: string | null = null;
+
+        // Always start the preview generation workflow
+        if (!promptJson.prompt) return;
+        const prompt = promptJson.prompt;
+        console.log(
+          `[CLIENT] Starting Meshy 3D generation with prompt: "${prompt}"`
+        );
+
+        // Step 1: Start preview generation
+        console.log(`[CLIENT] Step 1: Starting PREVIEW generation...`);
+        const startRes = await fetch(`/api/visualizer/meshy/start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt, mode: "preview" }),
+        });
+
+        if (!startRes.ok) {
+          const txt = await startRes.text();
           console.log(
-            `[CLIENT] Starting Meshy 3D generation with prompt: "${prompt}"`
+            `[CLIENT] Meshy preview start error: ${startRes.status} - ${txt}`
           );
-
-          const startRes = await fetch(`/api/visualizer/meshy/start`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ prompt }),
-          });
-
-          if (!startRes.ok) {
-            const txt = await startRes.text();
-            console.log(
-              `[CLIENT] Meshy start error: ${startRes.status} - ${txt}`
-            );
-            setMeshyStatus(`meshy start error: ${startRes.status}`);
-            console.warn("meshy start error", txt);
-            return;
-          }
-
-          startJson = (await startRes.json()) as { id?: string };
-          console.log(
-            `[CLIENT] Meshy generation started with ID: ${startJson.id}`
-          );
-          if (!startJson.id) return;
-          setPhase("visualizing");
+          setMeshyStatus(`meshy preview start error: ${startRes.status}`);
+          console.warn("meshy preview start error", txt);
+          return;
         }
+
+        startJson = (await startRes.json()) as { id?: string; mode?: string };
+        console.log(
+          `[CLIENT] Meshy PREVIEW generation started with ID: ${startJson.id}, mode: ${startJson.mode}`
+        );
+        if (!startJson.id) {
+          console.log(`[CLIENT] No preview generation ID returned, exiting`);
+          return;
+        }
+        previewGenerationId = startJson.id;
+        console.log(
+          `[CLIENT] Set previewGenerationId to: ${previewGenerationId}`
+        );
+        setPhase("visualizing");
 
         type MeshyAsset = {
           url?: string;
@@ -394,12 +751,16 @@ export default function TrackVisualClient(props: Props) {
             GLB?: string;
             gltf?: string;
             GLTF?: string;
+            mtl?: string;
+            MTL?: string;
           } | null;
           modelUrls?: {
             glb?: string;
             GLB?: string;
             gltf?: string;
             GLTF?: string;
+            mtl?: string;
+            MTL?: string;
           } | null;
           assets?: MeshyAsset[] | null;
           files?: MeshyAsset[] | null;
@@ -407,6 +768,23 @@ export default function TrackVisualClient(props: Props) {
         const pickModelUrl = (j: MeshyStatus): string | null => {
           if (typeof j?.model_url === "string") return j.model_url;
           if (typeof j?.modelUrl === "string") return j.modelUrl;
+
+          // Also try to extract MTL URL for color information
+          const tryMTLUrl = (obj: unknown): string | null => {
+            if (!obj || typeof obj !== "object") return null;
+            const o = obj as {
+              mtl?: unknown;
+              MTL?: unknown;
+            };
+            const mtl =
+              typeof o.mtl === "string"
+                ? o.mtl
+                : typeof o.MTL === "string"
+                ? (o.MTL as string)
+                : null;
+            return mtl;
+          };
+
           const tryModelUrls = (obj: unknown): string | null => {
             if (!obj || typeof obj !== "object") return null;
             const o = obj as {
@@ -456,31 +834,214 @@ export default function TrackVisualClient(props: Props) {
           }
           return null;
         };
+        // Step 2: Poll preview generation status
+        console.log(
+          `[CLIENT] Step 2: Polling PREVIEW generation status for ID: ${previewGenerationId}`
+        );
         for (let i = 0; i < 40; i++) {
+          console.log(`[CLIENT] Preview poll attempt ${i + 1}/40`);
           await new Promise((r) => setTimeout(r, 3000));
           const s = await fetch(
             `/api/visualizer/meshy/status?id=${encodeURIComponent(
-              startJson.id!
+              previewGenerationId!
             )}`,
             { cache: "no-store" }
           );
-          if (!s.ok) continue;
+          if (!s.ok) {
+            console.log(`[CLIENT] Preview status request failed: ${s.status}`);
+            continue;
+          }
           const j = (await s.json()) as MeshyStatus;
-          setMeshyStatus(`meshy status: ${j.status ?? "pending"}`);
+          console.log(`[CLIENT] Preview status response:`, j);
+          setMeshyStatus(`meshy preview status: ${j.status ?? "pending"}`);
           const picked = pickModelUrl(j);
+          console.log(`[CLIENT] Picked model URL from preview:`, picked);
           if (picked) {
-            modelUrl = picked;
-            console.log(`[CLIENT] Meshy model URL selected: ${modelUrl}`);
+            previewModelUrl = picked;
+            console.log(
+              `[CLIENT] PREVIEW model URL selected: ${previewModelUrl}`
+            );
+            console.log(`[CLIENT] Breaking out of preview polling loop`);
+
+            // Immediately display the preview model with color alteration as the visualizer
+            console.log(
+              `[CLIENT] 🎨 Loading preview model immediately as visualizer with album cover color alteration...`
+            );
+            await loadAndDisplayModel(previewModelUrl, "preview");
+
+            // Set model ready to true so the preview is displayed immediately
+            setModelReady(true);
+            setMeshyStatus("preview ready - refining for better quality...");
+
             break;
           }
-          if (j.status && /failed|canceled/i.test(j.status)) break;
+          if (j.status && /failed|canceled/i.test(j.status)) {
+            console.log(
+              `[CLIENT] PREVIEW generation failed or canceled: ${j.status}`
+            );
+            break;
+          }
         }
-        if (!modelUrl) return;
+
+        console.log(
+          `[CLIENT] Preview polling loop completed. previewModelUrl: ${previewModelUrl}`
+        );
+
+        if (!previewModelUrl) {
+          console.log(
+            `[CLIENT] PREVIEW generation did not complete successfully`
+          );
+          return;
+        }
+
+        console.log(`[CLIENT] PREVIEW generation completed successfully!`);
+        console.log(`[CLIENT] About to start Step 3: REFINE generation...`);
+        console.log(
+          `[CLIENT] Current state - previewGenerationId: ${previewGenerationId}, previewModelUrl: ${previewModelUrl}`
+        );
+
+        // Step 3: Request refinement using the preview ID
+        console.log(
+          `[CLIENT] Step 3: Starting REFINE generation using preview ID: ${previewGenerationId}`
+        );
+        console.log(
+          `[CLIENT] Sending refine request to /api/visualizer/meshy/refine`
+        );
+        console.log(`[CLIENT] Refine request body:`, {
+          previewId: previewGenerationId,
+          prompt: promptJson.prompt,
+          enablePbr: true,
+          topology: "triangle",
+        });
+        setMeshyStatus(`refining 3D model...`);
+
+        const refineRes = await fetch(`/api/visualizer/meshy/refine`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            previewId: previewGenerationId,
+            prompt: promptJson.prompt, // Optional: can override prompt for refinement
+            enablePbr: true,
+            topology: "triangle",
+          }),
+        });
+
+        console.log(`[CLIENT] Refine response status: ${refineRes.status}`);
+        console.log(
+          `[CLIENT] Refine response headers:`,
+          Object.fromEntries(refineRes.headers.entries())
+        );
+
+        if (!refineRes.ok) {
+          const txt = await refineRes.text();
+          console.log(
+            `[CLIENT] Meshy refine error: ${refineRes.status} - ${txt}`
+          );
+          setMeshyStatus(`meshy refine error: ${refineRes.status}`);
+          console.warn("meshy refine error", txt);
+          // Fallback to preview model if refinement fails
+          console.log(
+            `[CLIENT] Falling back to preview model due to refine error`
+          );
+          modelUrl = previewModelUrl;
+        } else {
+          const refineJson = (await refineRes.json()) as {
+            id?: string;
+            mode?: string;
+            previewId?: string;
+          };
+          console.log(`[CLIENT] Refine response JSON:`, refineJson);
+          console.log(
+            `[CLIENT] Meshy REFINE generation started with ID: ${refineJson.id}, mode: ${refineJson.mode}, previewId: ${refineJson.previewId}`
+          );
+
+          if (refineJson.id) {
+            // Step 4: Poll refinement status
+            console.log(
+              `[CLIENT] Step 4: Polling REFINE generation status for ID: ${refineJson.id}`
+            );
+            for (let i = 0; i < 60; i++) {
+              // Longer timeout for refinement
+              await new Promise((r) => setTimeout(r, 5000)); // Slower polling for refinement
+              const s = await fetch(
+                `/api/visualizer/meshy/status?id=${encodeURIComponent(
+                  refineJson.id
+                )}`,
+                { cache: "no-store" }
+              );
+              if (!s.ok) continue;
+              const j = (await s.json()) as MeshyStatus;
+              setMeshyStatus(`meshy refine status: ${j.status ?? "pending"}`);
+              const picked = pickModelUrl(j);
+              if (picked) {
+                modelUrl = picked;
+                console.log(`[CLIENT] REFINE model URL selected: ${modelUrl}`);
+                console.log(
+                  `[CLIENT] REFINE generation completed successfully! Replacing preview with high-quality model.`
+                );
+
+                // Replace the preview model with the refined one
+                console.log(
+                  `[CLIENT] 🔄 Replacing preview model with refined model...`
+                );
+                await loadAndDisplayModel(modelUrl, "refined");
+
+                // Update status to indicate refinement is complete
+                setMeshyStatus(
+                  "refinement complete - high quality model loaded"
+                );
+
+                break;
+              }
+              if (j.status && /failed|canceled/i.test(j.status)) {
+                console.log(
+                  `[CLIENT] REFINE generation failed or canceled: ${j.status}`
+                );
+                break;
+              }
+            }
+
+            // If refinement didn't complete, fallback to preview
+            if (!modelUrl) {
+              console.log(
+                `[CLIENT] REFINE generation did not complete, falling back to preview model`
+              );
+              modelUrl = previewModelUrl;
+            }
+          } else {
+            console.log(
+              `[CLIENT] REFINE request failed to return ID, falling back to preview model`
+            );
+            modelUrl = previewModelUrl;
+          }
+        }
+
+        if (!modelUrl) {
+          console.log(
+            `[CLIENT] No model URL available after preview and refine attempts`
+          );
+          return;
+        }
+
+        // Determine if this is a refined model or preview fallback
+        const isRefinedModel = modelUrl !== previewModelUrl;
+        console.log(
+          `[CLIENT] Loading ${
+            isRefinedModel ? "REFINED" : "PREVIEW"
+          } model: ${modelUrl}`
+        );
+        console.log(
+          `[CLIENT] Model type: ${
+            isRefinedModel ? "High-quality refined" : "Preview fallback"
+          }`
+        );
 
         if (!gltfLoaderRef.current) gltfLoaderRef.current = new GLTFLoader();
         const proxiedUrl = `/api/visualizer/meshy/fetch?url=${encodeURIComponent(
           modelUrl!
         )}`;
+        console.log(`[CLIENT] Proxied URL for loading: ${proxiedUrl}`);
+
         // Always dispose and replace the loader to avoid parallel loads adding twice
         try {
           const anyLoader = gltfLoaderRef.current as unknown as {
@@ -490,12 +1051,136 @@ export default function TrackVisualClient(props: Props) {
         } catch {}
         gltfLoaderRef.current = new GLTFLoader();
         setPhase("creating");
+
+        console.log(
+          `[CLIENT] Starting GLTF load for ${
+            isRefinedModel ? "refined" : "preview"
+          } model...`
+        );
         const gltf = await new Promise<GLTF>((resolve, reject) => {
           gltfLoaderRef.current!.load(proxiedUrl, resolve, undefined, reject);
         });
+
+        console.log("[DEBUG] GLTF loaded:", gltf);
+        console.log("[DEBUG] GLTF scene:", gltf.scene);
+        console.log(
+          "[DEBUG] GLTF scene children count:",
+          gltf.scene.children.length
+        );
+
+        // Log the complete workflow summary
+        console.log(`[CLIENT] 🎯 MESHY WORKFLOW COMPLETE:`);
+        console.log(
+          `[CLIENT]   ✅ Preview generation: ${previewGenerationId || "N/A"}`
+        );
+        console.log(
+          `[CLIENT]   ✅ Preview model URL: ${previewModelUrl || "N/A"}`
+        );
+        console.log(`[CLIENT]   ✅ Final model URL: ${modelUrl || "N/A"}`);
+        console.log(
+          `[CLIENT]   ✅ Model type: ${
+            isRefinedModel ? "REFINED (high-quality)" : "PREVIEW (fallback)"
+          }`
+        );
+        console.log(
+          `[CLIENT]   ✅ GLTF loaded successfully with ${gltf.scene.children.length} children`
+        );
+        console.log(
+          `[CLIENT]   🎉 Ready to display ${
+            isRefinedModel ? "refined" : "preview"
+          } visualizer!`
+        );
+
+        // Try to extract colors from MTL file if available
+        const tryExtractMTLColors = async (): Promise<Record<
+          string,
+          THREE.Color
+        > | null> => {
+          try {
+            // Check if we have access to the MTL file URL from the Meshy response
+            // This would need to be passed down from the Meshy API response
+            const mtlUrl = (window as unknown as Record<string, unknown>)
+              .meshyMTLUrl as string | undefined;
+            if (!mtlUrl) return null;
+
+            console.log(
+              "[DEBUG] Attempting to extract colors from MTL file:",
+              mtlUrl
+            );
+
+            const response = await fetch(mtlUrl);
+            if (!response.ok) return null;
+
+            const mtlContent = await response.text();
+            const colors: Record<string, THREE.Color> = {};
+
+            // Parse MTL file for material definitions
+            const lines = mtlContent.split("\n");
+            let currentMaterial = "";
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (trimmed.startsWith("newmtl ")) {
+                currentMaterial = trimmed.substring(7);
+              } else if (trimmed.startsWith("Kd ") && currentMaterial) {
+                // Diffuse color
+                const parts = trimmed.substring(3).split(" ").map(Number);
+                if (parts.length >= 3) {
+                  colors[currentMaterial] = new THREE.Color(
+                    parts[0],
+                    parts[1],
+                    parts[2]
+                  );
+                }
+              } else if (
+                trimmed.startsWith("Ka ") &&
+                currentMaterial &&
+                !colors[currentMaterial]
+              ) {
+                // Ambient color (fallback if no diffuse)
+                const parts = trimmed.substring(3).split(" ").map(Number);
+                if (parts.length >= 3) {
+                  colors[currentMaterial] = new THREE.Color(
+                    parts[0],
+                    parts[1],
+                    parts[2]
+                  );
+                }
+              }
+            }
+
+            console.log("[DEBUG] Extracted MTL colors:", colors);
+            return Object.keys(colors).length > 0 ? colors : null;
+          } catch (error) {
+            console.log("[DEBUG] MTL color extraction failed:", error);
+            return null;
+          }
+        };
+
         const root: THREE.Group =
           (gltf.scene as THREE.Group) || (gltf.scenes?.[0] as THREE.Group);
         if (!root) return;
+
+        // Debug: Log all materials in the scene
+        root.traverse((obj: THREE.Object3D) => {
+          if (obj instanceof THREE.Mesh) {
+            console.log("[DEBUG] Mesh found:", obj);
+            console.log("[DEBUG] Mesh material:", obj.material);
+            if (obj.material) {
+              console.log("[DEBUG] Material type:", obj.material.type);
+              const material = obj.material as THREE.Material & {
+                color?: THREE.Color;
+                map?: THREE.Texture;
+              };
+              console.log("[DEBUG] Material color:", material.color);
+              console.log("[DEBUG] Material map:", material.map);
+              console.log(
+                "[DEBUG] Material properties:",
+                Object.keys(obj.material)
+              );
+            }
+          }
+        });
         // Ensure only one model: clear the model group entirely before adding
         try {
           const group = currentObjectRef.current as THREE.Group;
@@ -530,11 +1215,245 @@ export default function TrackVisualClient(props: Props) {
         const scalar = desiredMaxSize / currentMaxSize;
         root.scale.multiplyScalar(scalar);
         baseScaleRef.current = root.scale.x;
-        // Apply our shader to every mesh so displacement still works
+        // Apply displacement effects while preserving original model colors
         root.traverse((obj: THREE.Object3D) => {
           if (obj instanceof THREE.Mesh) {
-            obj.material = material;
-            obj.geometry.computeVertexNormals?.();
+            const originalMaterial = obj.material;
+            console.log(
+              "[DEBUG] Processing mesh with material:",
+              originalMaterial?.type
+            );
+
+            // Enhanced material enhancement system
+            const hasValidColor = (mat: THREE.Material): boolean => {
+              const m = mat as THREE.Material & {
+                color?: THREE.Color;
+                map?: THREE.Texture;
+              };
+              if (m.map) return true; // Has texture
+              if (m.color) {
+                const c = m.color;
+                // Check if color is not monochromatic (not all RGB values are similar)
+                const avg = (c.r + c.g + c.b) / 3;
+                const variance = Math.sqrt(
+                  (Math.pow(c.r - avg, 2) +
+                    Math.pow(c.g - avg, 2) +
+                    Math.pow(c.b - avg, 2)) /
+                    3
+                );
+                return variance > 0.1; // Significant color variation
+              }
+              return false;
+            };
+
+            const enhanceMaterial = (
+              material: THREE.Material,
+              meshName: string
+            ): THREE.Material => {
+              const enhanced = material.clone();
+
+              if (!hasValidColor(enhanced)) {
+                console.log(
+                  "[DEBUG] Material lacks proper colors, enhancing..."
+                );
+
+                // Generate song-aware colors based on track characteristics
+                const generateSongColors = (): THREE.Color => {
+                  // Use track title and artist for deterministic but varied colors
+                  const seed = `${props.title}${props.artistNames}`;
+                  let hash = 0;
+                  for (let i = 0; i < seed.length; i++) {
+                    hash =
+                      ((hash << 5) - hash + seed.charCodeAt(i)) & 0xffffffff;
+                  }
+
+                  // Generate vibrant, varied colors
+                  const hue = (hash % 360) / 360;
+                  const saturation = 0.6 + ((hash >> 8) % 40) / 100; // 0.6-1.0
+                  const lightness = 0.4 + ((hash >> 16) % 30) / 100; // 0.4-0.7
+
+                  return new THREE.Color().setHSL(hue, saturation, lightness);
+                };
+
+                // Generate complementary colors for variety
+                const generateComplementaryColors = (
+                  baseColor: THREE.Color
+                ): THREE.Color[] => {
+                  const hsl = { h: 0, s: 0, l: 0 };
+                  baseColor.getHSL(hsl);
+
+                  const complementary = new THREE.Color().setHSL(
+                    (hsl.h + 0.5) % 1,
+                    hsl.s,
+                    hsl.l
+                  );
+
+                  const analogous1 = new THREE.Color().setHSL(
+                    (hsl.h + 0.083) % 1,
+                    hsl.s,
+                    hsl.l
+                  );
+
+                  const analogous2 = new THREE.Color().setHSL(
+                    (hsl.h - 0.083 + 1) % 1,
+                    hsl.s,
+                    hsl.l
+                  );
+
+                  return [complementary, analogous1, analogous2];
+                };
+
+                const baseColor = generateSongColors();
+                const complementaryColors =
+                  generateComplementaryColors(baseColor);
+
+                // Apply enhanced material properties
+                if (enhanced instanceof THREE.MeshStandardMaterial) {
+                  // Create a more sophisticated material
+                  enhanced.color = baseColor;
+                  enhanced.emissive = complementaryColors[0]
+                    .clone()
+                    .multiplyScalar(0.1);
+                  enhanced.emissiveIntensity = 0.2;
+
+                  // Vary material properties based on song characteristics
+                  const titleHash = props.title
+                    .split("")
+                    .reduce((a, b) => a + b.charCodeAt(0), 0);
+                  enhanced.metalness = 0.1 + (titleHash % 60) / 100; // 0.1-0.7
+                  enhanced.roughness = 0.2 + (titleHash % 50) / 100; // 0.2-0.7
+
+                  // Add subtle color variation across the mesh
+                  enhanced.vertexColors = true;
+
+                  // Create vertex colors for subtle variation
+                  if (
+                    obj instanceof THREE.Mesh &&
+                    obj.geometry.attributes.position
+                  ) {
+                    const positions = obj.geometry.attributes.position.array;
+                    const colors = new Float32Array(positions.length);
+
+                    for (let i = 0; i < positions.length; i += 3) {
+                      const x = positions[i];
+                      const y = positions[i + 1];
+                      const z = positions[i + 2];
+
+                      // Create subtle color variation based on position
+                      const noise =
+                        Math.sin(x * 2) * Math.cos(y * 3) * Math.sin(z * 4);
+                      const colorVariation = 0.1;
+
+                      colors[i] = baseColor.r + noise * colorVariation;
+                      colors[i + 1] = baseColor.g + noise * colorVariation;
+                      colors[i + 2] = baseColor.b + noise * colorVariation;
+                    }
+
+                    (obj as THREE.Mesh).geometry.setAttribute(
+                      "color",
+                      new THREE.BufferAttribute(colors, 3)
+                    );
+                  }
+
+                  console.log(
+                    `[DEBUG] Applied enhanced material with color:`,
+                    enhanced.color
+                  );
+                } else if (enhanced instanceof THREE.MeshBasicMaterial) {
+                  enhanced.color = baseColor;
+                  console.log(
+                    `[DEBUG] Applied enhanced basic material with color:`,
+                    enhanced.color
+                  );
+                } else if (enhanced instanceof THREE.MeshPhongMaterial) {
+                  enhanced.color = baseColor;
+                  enhanced.emissive = complementaryColors[0]
+                    .clone()
+                    .multiplyScalar(0.1);
+                  enhanced.shininess = 30 + (props.title.length % 50);
+                  console.log(
+                    `[DEBUG] Applied enhanced phong material with color:`,
+                    enhanced.color
+                  );
+                }
+              }
+
+              return enhanced;
+            };
+
+            // Store the original geometry for displacement calculations
+            const originalGeometry = obj.geometry.clone();
+            obj.userData.originalGeometry = originalGeometry;
+            obj.userData.originalMaterial = originalMaterial;
+
+            // If the material doesn't have proper colors, enhance it
+            if (!hasValidColor(originalMaterial)) {
+              obj.material = enhanceMaterial(originalMaterial, obj.name);
+            }
+
+            // Create a displacement modifier that works with any material
+            const displacementModifier = {
+              time: 0,
+              amplitude: 0,
+              apply: (time: number, amplitude: number) => {
+                if (!obj.userData.originalGeometry) return;
+
+                const geo = obj.userData.originalGeometry;
+                const positions = geo.attributes.position.array;
+                const normals = geo.attributes.normal.array;
+
+                // Create a new geometry with displacement
+                const newGeo = geo.clone();
+                const newPositions = newGeo.attributes.position.array;
+
+                // Smooth noise function for uniform distortion
+                const smoothNoise = (
+                  x: number,
+                  y: number,
+                  z: number,
+                  time: number
+                ) => {
+                  // Generate smooth noise values using sine waves for uniformity
+                  const noiseX = Math.sin(x * 0.5 + time * 0.1) * 0.5 + 0.5;
+                  const noiseY = Math.sin(y * 0.5 + time * 0.08) * 0.5 + 0.5;
+                  const noiseZ = Math.sin(z * 0.5 + time * 0.12) * 0.5 + 0.5;
+
+                  // Combine with smooth interpolation
+                  const combined = (noiseX + noiseY + noiseZ) / 3;
+                  return combined;
+                };
+
+                for (let i = 0; i < positions.length; i += 3) {
+                  const x = positions[i];
+                  const y = positions[i + 1];
+                  const z = positions[i + 2];
+
+                  // Generate smooth, uniform displacement
+                  const noise = smoothNoise(x, y, z, time);
+                  // Convert from 0-1 range to -1 to 1 range, then apply amplitude
+                  const disp = (noise - 0.5) * 2.0 * amplitude;
+
+                  // Apply displacement along normal direction
+                  const nx = normals[i];
+                  const ny = normals[i + 1];
+                  const nz = normals[i + 2];
+
+                  newPositions[i] = x + nx * disp;
+                  newPositions[i + 1] = y + ny * disp;
+                  newPositions[i + 2] = z + nz * disp;
+                }
+
+                newGeo.attributes.position.needsUpdate = true;
+                newGeo.computeVertexNormals();
+
+                // Update the mesh geometry
+                obj.geometry.dispose();
+                obj.geometry = newGeo;
+              },
+            };
+
+            // Store the modifier for animation updates
+            obj.userData.displacementModifier = displacementModifier;
           }
         });
         // Add the GLTF root into the dedicated model group
@@ -599,7 +1518,7 @@ export default function TrackVisualClient(props: Props) {
 
     // animate
     const tick = (t: number) => {
-      uniforms.u_time.value = t * 0.001;
+      const time = t * 0.001;
       const analyserNode = analyserLatestRef.current;
       const fft = fftLatestRef.current;
       if (analyserNode && fft && recipe) {
@@ -608,18 +1527,54 @@ export default function TrackVisualClient(props: Props) {
             fft as unknown as Uint8Array<ArrayBuffer>
           );
         } catch {}
+        // Improved FFT processing for uniform distortion
         const lowIdx = recipe.audioMapping?.fftBands?.low ?? 2;
         const midIdx = recipe.audioMapping?.fftBands?.mid ?? 24;
         const highIdx = recipe.audioMapping?.fftBands?.high ?? 96;
+
+        // Get frequency band values with smoothing
         const low = (fft as Uint8Array)[lowIdx] ?? 0;
         const mid = (fft as Uint8Array)[midIdx] ?? 0;
         const high = (fft as Uint8Array)[highIdx] ?? 0;
-        const energy = (low + mid + high) / (3 * 255);
+
+        // Apply smoothing to reduce spiky behavior
+        const smoothingFactor = 0.85;
+        const smoothedLow = (low + (lastLowRef.current ?? low)) / 2;
+        const smoothedMid = (mid + (lastMidRef.current ?? mid)) / 2;
+        const smoothedHigh = (high + (lastHighRef.current ?? high)) / 2;
+
+        // Store for next frame
+        lastLowRef.current = smoothedLow;
+        lastMidRef.current = smoothedMid;
+        lastHighRef.current = smoothedHigh;
+
+        // Calculate energy with better normalization and smoothing
+        const energy = (smoothedLow + smoothedMid + smoothedHigh) / (3 * 255);
+        const smoothedEnergy = THREE.MathUtils.lerp(
+          lastEnergyRef.current ?? energy,
+          energy,
+          1 - smoothingFactor
+        );
+        lastEnergyRef.current = smoothedEnergy;
+
         const baseAmp =
           (recipe.deformation as { amplitude?: number } | undefined)
             ?.amplitude ?? 0.3;
-        const combined = 0.55 * energy + 0.45 * spotifyScalar;
-        uniforms.u_amplitude.value = baseAmp * combined;
+        const combined = 0.55 * smoothedEnergy + 0.45 * spotifyScalar;
+        const amplitude = baseAmp * combined;
+
+        // Update displacement for all meshes using the new modifier system
+        if (currentObjectRef.current) {
+          currentObjectRef.current.traverse((obj: THREE.Object3D) => {
+            if (
+              obj instanceof THREE.Mesh &&
+              obj.userData.displacementModifier
+            ) {
+              const modifier = obj.userData.displacementModifier;
+              modifier.apply(time, amplitude);
+            }
+          });
+        }
 
         const obj = currentObjectRef.current;
         if (obj) {
@@ -647,7 +1602,6 @@ export default function TrackVisualClient(props: Props) {
     sceneRef.current = scene;
     cameraRef.current = camera;
     rendererRef.current = renderer;
-    materialRef.current = material;
 
     onResize();
 
@@ -666,7 +1620,7 @@ export default function TrackVisualClient(props: Props) {
         } catch {}
         currentObjectRef.current = null;
       }
-      material.dispose();
+
       renderer.dispose();
       // Remove canvas so we don't accumulate multiple canvases
       try {
@@ -736,38 +1690,6 @@ export default function TrackVisualClient(props: Props) {
     return "Creating scene";
   }, [phase, meshyPrompt]);
 
-  const humanizeMeshyStatus = (status: string | null): string | null => {
-    if (!status) return null;
-    const raw = status.trim();
-    const s = raw.toLowerCase();
-    if (
-      s.includes("in_progress") ||
-      s.includes("progress") ||
-      s.includes("processing")
-    ) {
-      return "Creating 3D asset";
-    }
-    if (
-      s.includes("queued") ||
-      s.includes("in_queue") ||
-      s.includes("pending")
-    ) {
-      return "Preparing 3D asset";
-    }
-    if (
-      s.includes("success") ||
-      s.includes("succeeded") ||
-      s.includes("completed")
-    ) {
-      return null;
-    }
-    if (s.includes("fail") || s.includes("cancel")) {
-      return "3D asset generation failed";
-    }
-    // For any non-standard string, just show it as-is (already user-friendly)
-    return raw;
-  };
-
   if (error) {
     return (
       <div>
@@ -826,11 +1748,6 @@ export default function TrackVisualClient(props: Props) {
               <div style={{ fontSize: 20, lineHeight: 1.25 }}>
                 <ShimmerText text={currentLoadingMessage} />
               </div>
-              {humanizeMeshyStatus(meshyStatus) && (
-                <div style={{ marginTop: 8, fontSize: 14, opacity: 0.85 }}>
-                  {humanizeMeshyStatus(meshyStatus)}
-                </div>
-              )}
             </div>
           </div>
         </div>

@@ -2,23 +2,65 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { cacheGetOrSet, cacheSet } from "@/lib/cache";
 
-const inputSchema = z.object({ prompt: z.string().min(8) });
+const inputSchema = z.object({
+  prompt: z.string().min(8),
+  mode: z.enum(["preview", "refine"]).optional().default("preview"),
+  previewId: z.string().optional(), // Required when mode is "refine"
+});
 
-// Starts a Meshy text-to-3D generation and returns an id for polling
+/**
+ * Meshy 3D Generation Workflow:
+ *
+ * 1. PREVIEW MODE (default):
+ *    - POST /api/visualizer/meshy/start with { prompt, mode: "preview" }
+ *    - Returns { id, mode: "preview" }
+ *    - Use this ID to poll /api/visualizer/meshy/status?id=<id>
+ *    - When status shows "completed", you get a low-quality preview model
+ *
+ * 2. REFINE MODE:
+ *    - POST /api/visualizer/meshy/start with { prompt, mode: "refine", previewId: "<preview-id>" }
+ *    - OR use the dedicated refine endpoint: POST /api/visualizer/meshy/refine with { previewId, prompt?, enablePbr?, topology? }
+ *    - Returns { id, mode: "refine", previewId }
+ *    - Use this ID to poll /api/visualizer/meshy/status?id=<id>
+ *    - When status shows "completed", you get the final high-quality model
+ *
+ * 3. FETCH MODEL:
+ *    - Use /api/visualizer/meshy/fetch?url=<model-url> to proxy the final GLB/GLTF file
+ *
+ * Note: Refine mode requires a completed preview generation ID and produces higher quality results.
+ */
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const parsed = inputSchema.safeParse(body);
   if (!parsed.success)
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
 
-  const { prompt } = parsed.data;
+  const { prompt, mode, previewId } = parsed.data;
+
+  // Validate that previewId is provided when mode is "refine"
+  if (mode === "refine" && !previewId) {
+    return NextResponse.json(
+      {
+        error: "previewId is required when mode is 'refine'",
+      },
+      { status: 400 }
+    );
+  }
   const apiKey = process.env.MESHY_API_KEY;
-  
-  console.log(`[MESHY START] Starting 3D generation with prompt: "${prompt}"`);
+
+  console.log(
+    `[MESHY START] Starting ${mode} mode 3D generation with prompt: "${prompt}"`
+  );
+  console.log(`[MESHY START] Mode: ${mode}`);
+  if (mode === "refine") {
+    console.log(`[MESHY START] Refining preview ID: ${previewId}`);
+  }
   console.log(`[MESHY START] Prompt length: ${prompt.length} characters`);
-  
+
   if (!apiKey) {
-    console.log(`[MESHY START] Error: Missing MESHY_API_KEY environment variable`);
+    console.log(
+      `[MESHY START] Error: Missing MESHY_API_KEY environment variable`
+    );
     return NextResponse.json(
       { error: "Missing MESHY_API_KEY" },
       { status: 500 }
@@ -26,52 +68,98 @@ export async function POST(req: Request) {
   }
 
   try {
-    console.log(`[MESHY START] Calling Meshy API with key: ${apiKey.substring(0, 8)}...`);
-
-    const cacheKey = `meshy:start:${prompt}`;
-    const ttlMs = parseInt(process.env.MESHY_START_CACHE_TTL_MS || "300000", 10); // 5 min default
-    const { status, json } = await cacheGetOrSet<{ status: number; json: any }>(
-      cacheKey,
-      ttlMs,
-      async () => {
-        const res = await fetch("https://api.meshy.ai/v2/text-to-3d", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            mode: "preview",
-            prompt,
-            topology: "triangle",
-            enable_pbr: true,
-          }),
-        });
-        const json = await res.json();
-        return { status: res.status, json };
-      }
+    console.log(
+      `[MESHY START] Calling Meshy API with key: ${apiKey.substring(0, 8)}...`
     );
 
-    console.log(`[MESHY START] Meshy API response status: ${status}`);
-    console.log(`[MESHY START] Meshy API response:`, JSON.stringify(json, null, 2));
+    const cacheKey = `meshy:start:${mode}:${prompt}${
+      mode === "refine" ? `:${previewId}` : ""
+    }`;
+    const ttlMs = parseInt(
+      process.env.MESHY_START_CACHE_TTL_MS || "300000",
+      10
+    ); // 5 min default
 
-    if (status < 200 || status >= 300) return NextResponse.json(json, { status });
+    // Parameters for Meshy API based on mode
+    const enhancedParams = {
+      mode,
+      prompt,
+      topology: "triangle",
+      enable_pbr: true,
+      ...(mode === "refine" && previewId ? { PreviewTaskID: previewId } : {}),
+      ...(mode === "preview"
+        ? { seed: Math.floor(Math.random() * 1000000) }
+        : {}), // Random seed only for preview mode
+    };
+
+    console.log(
+      `[MESHY START] Enhanced API parameters:`,
+      JSON.stringify(enhancedParams, null, 2)
+    );
+
+    const { status, json } = await cacheGetOrSet<{
+      status: number;
+      json: Record<string, unknown>;
+    }>(cacheKey, ttlMs, async () => {
+      const res = await fetch("https://api.meshy.ai/v2/text-to-3d", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(enhancedParams),
+      });
+      const json = await res.json();
+      return { status: res.status, json };
+    });
+
+    console.log(`[MESHY START] Meshy API response status: ${status}`);
+    console.log(
+      `[MESHY START] Meshy API response:`,
+      JSON.stringify(json, null, 2)
+    );
+
+    if (status < 200 || status >= 300)
+      return NextResponse.json(json, { status });
 
     // Normalize Meshy response to always return { id } for client polling
     // Meshy may return various shapes; try common possibilities.
+    const jsonObj = json as Record<string, unknown>;
     let idCandidate =
-      (json && (json.id || json.task_id || json.generation_id)) ||
-      (json?.result && (json.result.id || json.result.task_id)) ||
-      (json?.data && (json.data.id || json.data.task_id));
+      (jsonObj && (jsonObj.id || jsonObj.task_id || jsonObj.generation_id)) ||
+      (jsonObj?.result &&
+        typeof jsonObj.result === "object" &&
+        jsonObj.result &&
+        ((jsonObj.result as Record<string, unknown>).id ||
+          (jsonObj.result as Record<string, unknown>).task_id)) ||
+      (jsonObj?.data &&
+        typeof jsonObj.data === "object" &&
+        jsonObj.data &&
+        ((jsonObj.data as Record<string, unknown>).id ||
+          (jsonObj.data as Record<string, unknown>).task_id));
 
     // Meshy sometimes returns { result: "<generation-id>" }
-    if (!idCandidate && typeof json?.result === "string") {
-      idCandidate = json.result;
+    if (!idCandidate && typeof jsonObj?.result === "string") {
+      idCandidate = jsonObj.result;
     }
 
     if (typeof idCandidate === "string" && idCandidate.trim().length > 0) {
       console.log(`[MESHY START] Normalized generation ID: ${idCandidate}`);
-      return NextResponse.json({ id: idCandidate });
+
+      // Cache the generation ID for future reference
+      if (mode === "preview") {
+        cacheSet(
+          `meshy:preview:${idCandidate}`,
+          { prompt, timestamp: Date.now() },
+          parseInt(process.env.MESHY_PREVIEW_CACHE_TTL_MS || "86400000", 10) // 24h default
+        );
+      }
+
+      return NextResponse.json({
+        id: idCandidate,
+        mode,
+        ...(mode === "refine" && previewId ? { previewId } : {}),
+      });
     }
 
     // If we cannot find an id, return a 502 with the raw for debugging
