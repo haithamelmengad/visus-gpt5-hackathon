@@ -8,7 +8,7 @@
 - A random `NEXTAUTH_SECRET`
 
 ### One‑time Spotify setup
-1. Go to the Spotify Developer Dashboard and create an app.
+1. Go to the Spotify Developer Dashboard and create an app. https://developer.spotify.com/
 2. Add the redirect URI: `http://localhost:3000/api/auth/callback/spotify`.
 3. Copy the Client ID and Client Secret.
 
