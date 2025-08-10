@@ -28,11 +28,31 @@ export default async function TrackPage({
     !(session as unknown as { accessToken?: string }).accessToken
   ) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
-        background: "radial-gradient(60% 60% at 50% 20%, rgba(80,38,125,0.45) 0%, rgba(18,12,24,0.85) 48%, #07070a 100%)" }}>
-        <div style={{ width: 560, maxWidth: "100%", background: "rgba(14,14,18,0.94)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 18, padding: 16 }}>
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 24,
+          background:
+            "radial-gradient(60% 60% at 50% 20%, rgba(80,38,125,0.45) 0%, rgba(18,12,24,0.85) 48%, #07070a 100%)",
+        }}
+      >
+        <div
+          style={{
+            width: "400px",
+            maxWidth: "100%",
+            background: "rgba(14,14,18,0.94)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 18,
+            padding: 16,
+          }}
+        >
           <p style={{ color: "#eaeaea" }}>You must be signed in.</p>
-          <Link href="/" style={{ color: "#9aa0a6" }}>Go home</Link>
+          <Link href="/" style={{ color: "#9aa0a6" }}>
+            Go home
+          </Link>
         </div>
       </div>
     );
@@ -148,18 +168,22 @@ export default async function TrackPage({
   return (
     <div style={{ height: "100vh", position: "relative" }}>
       {/* Back button overlay */}
-      <div style={{ 
-        position: "absolute", 
-        top: "24px", 
-        left: "24px", 
-        zIndex: 10,
-        padding: "8px 16px",
-        borderRadius: "8px",
-        fontSize: 34,
-      }}>
-        <Link href="/" style={{ color: "#9aa0a6", textDecoration: "none" }}>←</Link>
+      <div
+        style={{
+          position: "absolute",
+          top: "24px",
+          left: "24px",
+          zIndex: 10,
+          padding: "8px 16px",
+          borderRadius: "8px",
+          fontSize: 34,
+        }}
+      >
+        <Link href="/" style={{ color: "#9aa0a6", textDecoration: "none" }}>
+          ←
+        </Link>
       </div>
-      
+
       <TrackVisualClient
         title={title}
         artistNames={artistNames}

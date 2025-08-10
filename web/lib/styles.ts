@@ -49,7 +49,7 @@ export const LAYOUTS = {
 
 export const PANELS = {
   main: {
-    width: 560,
+    width: 400,
     maxWidth: "100%",
     background: COLORS.background.panel,
     border: COLORS.border.primary,

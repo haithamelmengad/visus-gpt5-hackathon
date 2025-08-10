@@ -117,25 +117,63 @@ export default function Home() {
   };
 
   if (!session) {
+    // Dynamic glow animation keyframes
+    const glowKeyframes = `
+      @keyframes spotifyGlow {
+        0% { box-shadow: 0 6px 20px rgba(29,185,84,0.35), 0 0 0 0 rgba(29,185,84,0.4); }
+        50% { box-shadow: 0 8px 25px rgba(29,185,84,0.5), 0 0 20px 5px rgba(29,185,84,0.2); }
+        100% { box-shadow: 0 6px 20px rgba(29,185,84,0.35), 0 0 0 0 rgba(29,185,84,0.4); }
+      }
+    `;
+
+    const glowingSpotifyButton: React.CSSProperties = {
+      ...BUTTONS.spotify,
+      width: 280, // Reduced from 360
+      animation: "spotifyGlow 2s ease-in-out infinite",
+    };
+
     return (
-      <div style={gradientBg}>
-        <div style={centerWrap}>
-          <div style={PANELS.main}>
-            <div style={{ textAlign: "center", padding: 10 }}>
-              <h2 style={{ margin: 0, fontSize: 32, lineHeight: 1.15 }}>
-                Visualize your favorite
-                <br />
-                music
-              </h2>
-              <div style={{ height: 16 }} />
-              <button onClick={() => signIn("spotify")} style={BUTTONS.spotify}>
-                Connect Spotify
-              </button>
+      <>
+        <style>{glowKeyframes}</style>
+        <div style={gradientBg}>
+          <div style={centerWrap}>
+            <div style={PANELS.main}>
+              <div style={{ textAlign: "center", padding: "10px 6px" }}>
+                <h1
+                  style={{
+                    margin: 0,
+                    fontSize: 32,
+                    lineHeight: 1.2,
+                    fontWeight: 700,
+                    color: COLORS.text.primary,
+                  }}
+                >
+                  visus
+                </h1>
+                <p
+                  style={{
+                    margin: "8px 0 0 0",
+                    fontSize: 16,
+                    lineHeight: 1.3,
+                    color: COLORS.text.muted,
+                    fontWeight: 400,
+                  }}
+                >
+                  bring your music to life
+                </p>
+                <div style={{ height: 24 }} />
+                <button
+                  onClick={() => signIn("spotify")}
+                  style={glowingSpotifyButton}
+                >
+                  Connect Spotify
+                </button>
+              </div>
             </div>
           </div>
+          <div style={footerStyle}>[ stems labs ]</div>
         </div>
-        <div style={footerStyle}>[ stems labs ]</div>
-      </div>
+      </>
     );
   }
 
@@ -144,7 +182,7 @@ export default function Home() {
       <div style={centerWrap}>
         <div style={PANELS.main}>
           <div style={titleRowStyle}>
-            <h2 style={{ margin: 0 }}>Recently Played</h2>
+            <h3 style={{ margin: 0 }}>Select a track</h3>
             <div style={{ display: "flex", gap: 8 }}>
               <button
                 onClick={handleSignOut}
