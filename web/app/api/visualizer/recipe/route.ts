@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import type { VisualizerRecipe } from "@/types/visualizer";
+import { cacheGetOrSet } from "@/lib/cache";
 
 // Accept minimal input; server will enrich using Spotify API
 const inputSchema = z.object({
@@ -245,58 +246,66 @@ export async function POST(req: Request) {
 
   const jsonFormat = { type: "json_object" } as const;
   try {
-    const messages = [
-      { role: "system", content: system },
-      { role: "user", content: skipEnrichment ? fastUser : richUser },
-    ] as const;
+    // Cache key based on spotifyId and flags that alter the prompt/model
+    const cacheKey = `recipe:${spotifyId}:analysis:${includeAnalysis ? 1 : 0}:skip:${skipEnrichment ? 1 : 0}`;
+    const ttlMs = parseInt(process.env.RECIPE_CACHE_TTL_MS || "600000", 10); // default 10 min
 
-    // Apply a short timeout for fast path; on timeout, fall back to a local recipe
-    const timeoutMs = skipEnrichment
-      ? parseInt(process.env.OPENAI_FAST_TIMEOUT_MS || "8000", 10)
-      : 0;
+    const result = await cacheGetOrSet<VisualizerRecipe>(cacheKey, ttlMs, async () => {
+      const messages = [
+        { role: "system", content: system },
+        { role: "user", content: skipEnrichment ? fastUser : richUser },
+      ] as const;
 
-    const completionPromise = openai.chat.completions.create({
-      model,
-      messages: messages as any,
-      response_format: jsonFormat as unknown as { type: "json_object" },
-      max_tokens: 450,
-      temperature: 0.4,
+      // Apply a short timeout for fast path; on timeout, fall back to a local recipe
+      const timeoutMs = skipEnrichment
+        ? parseInt(process.env.OPENAI_FAST_TIMEOUT_MS || "8000", 10)
+        : 0;
+
+      const completionPromise = openai.chat.completions.create({
+        model,
+        messages: messages as any,
+        response_format: jsonFormat as unknown as { type: "json_object" },
+        max_tokens: 450,
+        temperature: 0.4,
+      });
+
+      const completionAny: any = timeoutMs > 0
+        ? await Promise.race([
+            completionPromise,
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error("openai_timeout")), timeoutMs)
+            ),
+          ])
+        : await completionPromise;
+
+      const content = completionAny.choices[0]?.message?.content || "{}";
+
+      let recipe: VisualizerRecipe | null = null;
+      try {
+        recipe = JSON.parse(content);
+      } catch {
+        // fallback minimal recipe when JSON parsing fails
+        const fallbackTitle = fullContext.core.title || legacyTitle || "Track";
+        recipe = {
+          seed: `${fallbackTitle}`.replace(/[^a-zA-Z0-9\s]/g, ""),
+          concept: `${fallbackTitle}`,
+          rationale: "Fallback minimal sphere with noise deformation.",
+          baseGeometry: "sphere",
+          baseParams: { radius: 1, widthSegments: 128, heightSegments: 128 },
+          colorPalette: ["#ffffff", "#222222", "#ff4081"],
+          deformation: { type: "noise", amplitude: 0.3, frequency: 2.5 },
+          audioMapping: {
+            fftBands: { low: 2, mid: 32, high: 128 },
+            spotifyWeights: { energy: 0.6, valence: 0.2, danceability: 0.2 },
+          },
+          fallbackPrompt: "openai_json_parse_error",
+        } as any;
+      }
+
+      return recipe as VisualizerRecipe;
     });
 
-    const completionAny: any = timeoutMs > 0
-      ? await Promise.race([
-          completionPromise,
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("openai_timeout")), timeoutMs)
-          ),
-        ])
-      : await completionPromise;
-
-    const content = completionAny.choices[0]?.message?.content || "{}";
-
-    let recipe: VisualizerRecipe | null = null;
-    try {
-      recipe = JSON.parse(content);
-    } catch {
-      // fallback minimal recipe when JSON parsing fails
-      const fallbackTitle = fullContext.core.title || legacyTitle || "Track";
-      recipe = {
-        seed: `${fallbackTitle}`.replace(/[^a-zA-Z0-9\s]/g, ""),
-        concept: `${fallbackTitle}`,
-        rationale: "Fallback minimal sphere with noise deformation.",
-        baseGeometry: "sphere",
-        baseParams: { radius: 1, widthSegments: 128, heightSegments: 128 },
-        colorPalette: ["#ffffff", "#222222", "#ff4081"],
-        deformation: { type: "noise", amplitude: 0.3, frequency: 2.5 },
-        audioMapping: {
-          fftBands: { low: 2, mid: 32, high: 128 },
-          spotifyWeights: { energy: 0.6, valence: 0.2, danceability: 0.2 },
-        },
-        fallbackPrompt: "openai_json_parse_error",
-      };
-    }
-
-    return NextResponse.json(recipe);
+    return NextResponse.json(result);
   } catch (err: unknown) {
     // On OpenAI API failure, return a deterministic fallback with a hint
     const fallbackTitle = fullContext.core.title || legacyTitle || "Track";

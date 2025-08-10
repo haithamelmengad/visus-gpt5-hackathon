@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import { z } from "zod";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { cacheGetOrSet } from "@/lib/cache";
 
 const inputSchema = z.object({
   spotifyId: z.string(),
@@ -147,17 +148,20 @@ export async function POST(req: Request) {
     
     console.log(`[MESHY] Generating prompt for track: ${fullContext.core.title} by ${fullContext.core.artist}`);
     console.log(`[MESHY] Using model: ${model}`);
-    
-    const completion = await openai.chat.completions.create({
-      model,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      response_format: { type: "text" } as any,
+    const cacheKey = `meshy:prompt:${spotifyId}:${includeAnalysis ? 1 : 0}`;
+    const ttlMs = parseInt(process.env.MESHY_PROMPT_CACHE_TTL_MS || "600000", 10);
+
+    const prompt = await cacheGetOrSet<string>(cacheKey, ttlMs, async () => {
+      const completion = await openai.chat.completions.create({
+        model,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        response_format: { type: "text" } as any,
+      });
+      return (completion.choices[0]?.message?.content || "").trim();
     });
-    
-    const prompt = (completion.choices[0]?.message?.content || "").trim();
     
     console.log(`[MESHY] OpenAI response for "${fullContext.core.title}":`);
     console.log(`[MESHY] Generated prompt: "${prompt}"`);

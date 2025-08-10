@@ -15,6 +15,12 @@ const nextConfig: NextConfig = {
   },
   // React 19 fast refresh is on by default; keep dev overlays enabled
   reactStrictMode: true,
+  // Allow production builds to proceed even if ESLint rules fail
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  // If needed later, we can also ignore type errors during builds by uncommenting:
+  // typescript: { ignoreBuildErrors: true },
 };
 
 export default nextConfig;

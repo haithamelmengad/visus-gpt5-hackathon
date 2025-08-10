@@ -95,7 +95,10 @@ export default function TrackPlayer({ title, artistNames, albumImageUrl, preview
           const analyserNode = analyserRef.current;
           const data = dataRef.current;
           if (analyserNode && data) {
-            analyserNode.getByteFrequencyData(data);
+            // Cast to satisfy TS generic mismatch between ArrayBuffer and ArrayBufferLike in lib types
+            analyserNode.getByteFrequencyData(
+              data as unknown as Uint8Array<ArrayBuffer>
+            );
             // Simple energy: average of bins
             let sum = 0;
             for (let i = 0; i < data.length; i++) sum += data[i];

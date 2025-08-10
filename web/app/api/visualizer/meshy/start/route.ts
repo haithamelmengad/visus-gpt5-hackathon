@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { cacheGetOrSet } from "@/lib/cache";
 
 const inputSchema = z.object({ prompt: z.string().min(8) });
 
@@ -27,26 +28,34 @@ export async function POST(req: Request) {
   try {
     console.log(`[MESHY START] Calling Meshy API with key: ${apiKey.substring(0, 8)}...`);
 
-    const res = await fetch("https://api.meshy.ai/v2/text-to-3d", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        mode: "preview",
-        prompt,
-        topology: "triangle",
-        enable_pbr: true,
-      }),
-    });
+    const cacheKey = `meshy:start:${prompt}`;
+    const ttlMs = parseInt(process.env.MESHY_START_CACHE_TTL_MS || "300000", 10); // 5 min default
+    const { status, json } = await cacheGetOrSet<{ status: number; json: any }>(
+      cacheKey,
+      ttlMs,
+      async () => {
+        const res = await fetch("https://api.meshy.ai/v2/text-to-3d", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            mode: "preview",
+            prompt,
+            topology: "triangle",
+            enable_pbr: true,
+          }),
+        });
+        const json = await res.json();
+        return { status: res.status, json };
+      }
+    );
 
-    const json = await res.json();
-
-    console.log(`[MESHY START] Meshy API response status: ${res.status}`);
+    console.log(`[MESHY START] Meshy API response status: ${status}`);
     console.log(`[MESHY START] Meshy API response:`, JSON.stringify(json, null, 2));
 
-    if (!res.ok) return NextResponse.json(json, { status: res.status });
+    if (status < 200 || status >= 300) return NextResponse.json(json, { status });
 
     // Normalize Meshy response to always return { id } for client polling
     // Meshy may return various shapes; try common possibilities.

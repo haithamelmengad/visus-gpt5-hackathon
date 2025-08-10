@@ -471,7 +471,9 @@ export default function TrackVisualClient(props: Props) {
       uniforms.u_time.value = t * 0.001;
       if (analyser && fftArray && recipe) {
         try {
-          analyser.getByteFrequencyData(fftArray as Uint8Array);
+          analyser.getByteFrequencyData(
+            fftArray as unknown as Uint8Array<ArrayBuffer>
+          );
         } catch {}
         const lowIdx = recipe.audioMapping?.fftBands?.low ?? 2;
         const midIdx = recipe.audioMapping?.fftBands?.mid ?? 24;
