@@ -153,12 +153,11 @@ export default async function TrackPage({
         top: "24px", 
         left: "24px", 
         zIndex: 10,
-        background: "rgba(14,14,18,0.8)",
         padding: "8px 16px",
         borderRadius: "8px",
-        border: "1px solid rgba(255,255,255,0.1)"
+        fontSize: 34,
       }}>
-        <Link href="/" style={{ color: "#9aa0a6", textDecoration: "none" }}>← Back</Link>
+        <Link href="/" style={{ color: "#9aa0a6", textDecoration: "none" }}>←</Link>
       </div>
       
       <TrackVisualClient

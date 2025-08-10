@@ -324,36 +324,7 @@ export default function ThreeScene({
         scene.add(textMesh);
         meshRef.current = textMesh;
       } catch {
-        // Fallback to procedural geometry
-        let geometry: THREE.BufferGeometry;
-        switch (variant) {
-          case 0:
-            geometry = new THREE.TorusKnotGeometry(
-              pick(0.8, 1.2, 0),
-              pick(0.2, 0.5, 10),
-              200,
-              16,
-              Math.floor(pick(1, 4, 20)),
-              Math.floor(pick(1, 8, 24))
-            );
-            break;
-          case 1:
-            geometry = new THREE.IcosahedronGeometry(pick(0.9, 1.3, 4), 1);
-            break;
-          case 2:
-            geometry = new THREE.DodecahedronGeometry(pick(0.9, 1.3, 8), 0);
-            break;
-          default:
-            geometry = new THREE.TorusGeometry(
-              pick(0.8, 1.4, 12),
-              pick(0.15, 0.45, 16),
-              24,
-              180
-            );
-        }
-        const mesh = new THREE.Mesh(geometry, material);
-        scene.add(mesh);
-        meshRef.current = mesh;
+        
       }
     };
 

@@ -94,6 +94,35 @@ export default function Home() {
     width: "100%",
   };
 
+  // Buttons
+  const buttonBase: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "10px 14px",
+    borderRadius: 12,
+    color: "#eaeaea",
+    fontWeight: 600,
+    fontSize: 14,
+    cursor: "pointer",
+    transition: "transform 120ms ease, box-shadow 120ms ease, background 160ms ease, border-color 160ms ease",
+  };
+  
+  const signOutBtn: React.CSSProperties = {
+    appearance: "none" as any,
+    background: "transparent",
+    border: "none",
+    outline: "none",
+    padding: 6,
+    margin: 0,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+    color: "#ffffff",
+    cursor: "pointer",
+  };
+
   if (!session) {
     return (
       <div style={gradientBg}>
@@ -135,8 +164,28 @@ export default function Home() {
           <div style={titleRowStyle}>
             <h2 style={{ margin: 0 }}>Recently Played</h2>
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => window.location.reload()}>Refresh</button>
-              <button onClick={() => signOut()}>Sign out</button>
+              <button
+                onClick={() => signOut()}
+                style={signOutBtn}
+                aria-label="Sign out"
+                title="Sign out"
+              >
+                <svg
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+              </button>
             </div>
           </div>
 
