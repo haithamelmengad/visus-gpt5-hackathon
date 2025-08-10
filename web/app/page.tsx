@@ -3,6 +3,7 @@
 import { signIn, signOut, useSession } from "next-auth/react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import TrackListSkeleton from "@/components/TrackListSkeleton";
 import LoginSkeleton from "@/components/LoginSkeleton";
 import { COLORS, LAYOUTS, PANELS, BUTTONS } from "@/lib/styles";
@@ -143,13 +144,18 @@ export default function Home() {
                 <h1
                   style={{
                     margin: 0,
-                    fontSize: 32,
                     lineHeight: 1.2,
                     fontWeight: 700,
                     color: COLORS.text.primary,
                   }}
                 >
-                  visus
+                  <Image
+                    src="/Visus.svg"
+                    alt="Visus"
+                    width={138}
+                    height={46}
+                    priority
+                  />
                 </h1>
                 <p
                   style={{
