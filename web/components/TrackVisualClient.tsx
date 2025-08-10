@@ -113,7 +113,7 @@ export default function TrackVisualClient(props: Props) {
   const fftLatestRef = useRef<Uint8Array | null>(null);
 
   // Data state
-  const [features] = useState<SpotifyFeatures | null>(null);
+  const [features, setFeatures] = useState<SpotifyFeatures | null>(null);
   const [recipe, setRecipe] = useState<VisualizerRecipe | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [meshyStatus, setMeshyStatus] = useState<string | null>(null);
@@ -138,6 +138,18 @@ export default function TrackVisualClient(props: Props) {
   const [modelReady, setModelReady] = useState(false);
   const baseScaleRef = useRef<number>(1);
   const isPlayingRef = useRef<boolean>(false);
+  const lastTickTimeRef = useRef<number>(0);
+  const tempoRef = useRef<number>(120);
+
+  // Keep latest tempo (BPM) available for the render loop
+  useEffect(() => {
+    const tempo = Number((features as unknown as { tempo?: number })?.tempo);
+    if (!Number.isNaN(tempo) && tempo > 0) {
+      tempoRef.current = tempo;
+    } else {
+      tempoRef.current = 120; // sensible default
+    }
+  }, [features]);
 
   // Smoothing refs for FFT data to reduce spiky distortion
   const lastLowRef = useRef<number>(0);
@@ -197,29 +209,28 @@ export default function TrackVisualClient(props: Props) {
     };
   }, [props.spotifyId, props.title, props.artistNames]);
 
-  // // Fetch Spotify audio features used by recipe weights
-  // useEffect(() => {
-  //   const id = props.spotifyId;
-  //   if (!id) return;
-  //   let aborted = false;
-  //   const run = async () => {
-  //     try {
-  //       const r = await fetch(`/api/spotify/features/${id}`, {
-  //         cache: "no-store",
-  //       });
-  //       if (!r.ok) throw new Error(await r.text());
-  //       const data = (await r.json()) as SpotifyFeatures;
-  //       if (!aborted) setFeatures(data);
-  //     } catch (e) {
-  //       // Non-fatal; the visualizer will still run driven by FFT
-  //       if (!aborted) setFeatures(null);
-  //     }
-  //   };
-  //   run();
-  //   return () => {
-  //     aborted = true;
-  //   };
-  // }, [props.spotifyId]);
+  // Fetch Spotify audio features (tempo used for rotation speed)
+  useEffect(() => {
+    const id = props.spotifyId;
+    if (!id) return;
+    let aborted = false;
+    const run = async () => {
+      try {
+        const r = await fetch(`/api/spotify/features/${id}`, {
+          cache: "no-store",
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const data = (await r.json()) as SpotifyFeatures;
+        if (!aborted) setFeatures(data);
+      } catch {
+        if (!aborted) setFeatures(null);
+      }
+    };
+    run();
+    return () => {
+      aborted = true;
+    };
+  }, [props.spotifyId]);
 
   // Compute a simple scalar from Spotify features using recipe-provided weights
   const spotifyScalar = useMemo(() => {
@@ -1473,8 +1484,8 @@ export default function TrackVisualClient(props: Props) {
 
     // simple pointer rotation
     let isPointerDown = false;
-    let lastX = 0,
-      lastY = 0;
+    let lastX = 0;
+    let lastY = 0;
     const onPointerDown = (e: PointerEvent) => {
       isPointerDown = true;
       lastX = e.clientX;
@@ -1485,12 +1496,14 @@ export default function TrackVisualClient(props: Props) {
     };
     const onPointerMove = (e: PointerEvent) => {
       if (!isPointerDown) return;
-      const dx = (e.clientX - lastX) * 0.005;
-      const dy = (e.clientY - lastY) * 0.005;
+      const dx = (e.clientX - lastX) * 0.003;
       const obj = currentObjectRef.current;
       if (!obj) return;
+      // Restrict interaction to y-axis rotation only; ignore x-axis tilt
       obj.rotation.y += dx;
-      obj.rotation.x += dy;
+      // Keep other axes stable
+      obj.rotation.x = 0;
+      obj.rotation.z = 0;
       lastX = e.clientX;
       lastY = e.clientY;
       // Safety: ensure model group contains at most one child
@@ -1578,11 +1591,23 @@ export default function TrackVisualClient(props: Props) {
 
         const obj = currentObjectRef.current;
         if (obj) {
-          // Rotate only while audio is playing
+          // Always enforce single-axis rotation constraint (y-axis)
+          obj.rotation.x = 0;
+          obj.rotation.z = 0;
+          // Rotate only while audio is playing; lock to y-axis; speed scaled by BPM
           if (isPlayingRef.current) {
-            const rotSpeed = 0.004 + 0.018 * energy;
-            obj.rotation.y += rotSpeed;
-            obj.rotation.x += 0.002 * (low / 255);
+            const bpm = tempoRef.current || 120;
+            // Base radians/sec from BPM: one full rotation every 8 beats
+            const baseRadsPerSec = ((bpm / 60) * (2 * Math.PI)) / 8;
+            // Mild modulation with energy
+            const radsPerSec = baseRadsPerSec * (0.9 + 0.2 * energy);
+            // Approximate frame delta using requestAnimationFrame timestamp
+            const now = performance.now();
+            let dt = (now - (lastTickTimeRef.current || now)) / 1000;
+            lastTickTimeRef.current = now;
+            // Clamp delta to avoid large jumps when tab was inactive
+            dt = Math.min(0.05, Math.max(0.001, dt));
+            obj.rotation.y += radsPerSec * dt;
           }
 
           // Audio-reactive uniform scale around the original fitted scale
