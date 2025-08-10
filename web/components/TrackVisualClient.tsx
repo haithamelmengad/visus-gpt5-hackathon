@@ -27,6 +27,9 @@ export default function TrackVisualClient(props: Props) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const [fftArray, setFftArray] = useState<Uint8Array | null>(null);
+  // Keep latest analyser/FFT in refs so the render effect does not re-init
+  const analyserLatestRef = useRef<AnalyserNode | null>(null);
+  const fftLatestRef = useRef<Uint8Array | null>(null);
 
   // Data state
   const [features, setFeatures] = useState<SpotifyFeatures | null>(null);
@@ -44,7 +47,9 @@ export default function TrackVisualClient(props: Props) {
   const materialRef = useRef<THREE.ShaderMaterial | null>(null);
   const frameRef = useRef<number | null>(null);
   const gltfLoaderRef = useRef<GLTFLoader | null>(null);
-  const currentObjectRef = useRef<THREE.Object3D | null>(null);
+  // Holds the single model that we render; we add/remove children inside this group
+  const currentObjectRef = useRef<THREE.Group | null>(null);
+  const modelLoadInProgressRef = useRef<boolean>(false);
   const [modelReady, setModelReady] = useState(false);
   const baseScaleRef = useRef<number>(1);
   const isPlayingRef = useRef<boolean>(false);
@@ -127,7 +132,10 @@ export default function TrackVisualClient(props: Props) {
   const handleAnalyserReady = (node: AnalyserNode) => {
     setAnalyser(node);
     try {
-      setFftArray(new Uint8Array(node.frequencyBinCount));
+      const arr = new Uint8Array(node.frequencyBinCount);
+      setFftArray(arr);
+      analyserLatestRef.current = node;
+      fftLatestRef.current = arr;
     } catch {}
   };
 
@@ -189,11 +197,19 @@ export default function TrackVisualClient(props: Props) {
       canvasRef.current = renderer.domElement;
     }
 
-    // lights
+    // lights (tag for identification)
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
     dirLight.position.set(5, 5, 5);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    const amb = new THREE.AmbientLight(0xffffff, 0.5);
+    (dirLight as any).isLight = true;
+    (amb as any).isLight = true;
+    scene.add(amb);
     scene.add(dirLight);
+
+    // Create a dedicated group that will contain exactly one loaded model
+    const modelGroup = new THREE.Group();
+    scene.add(modelGroup);
+    currentObjectRef.current = modelGroup;
 
     // No fallback primitive geometry; we wait for Meshy model
 
@@ -281,6 +297,8 @@ export default function TrackVisualClient(props: Props) {
     const tryLoadMeshyModel = async () => {
       try {
         if (!props.spotifyId) return;
+        if (modelLoadInProgressRef.current) return;
+        modelLoadInProgressRef.current = true;
         // Allow runtime opt-out via env flag; if not set, still proceed by default
         const enable =
           (process.env.NEXT_PUBLIC_ENABLE_MESHY ?? "true").toLowerCase() !==
@@ -390,11 +408,30 @@ export default function TrackVisualClient(props: Props) {
         const proxiedUrl = `/api/visualizer/meshy/fetch?url=${encodeURIComponent(
           modelUrl!
         )}`;
+        // Always dispose and replace the loader to avoid parallel loads adding twice
+        try { (gltfLoaderRef.current as any).manager?.itemEnd?.(proxiedUrl); } catch {}
+        gltfLoaderRef.current = new GLTFLoader();
         const gltf = await new Promise<any>((resolve, reject) => {
           gltfLoaderRef.current!.load(proxiedUrl, resolve, undefined, reject);
         });
         const root: THREE.Group = gltf.scene || gltf.scenes?.[0];
         if (!root) return;
+        // Ensure only one model: clear the model group entirely before adding
+        try {
+          const group = currentObjectRef.current as THREE.Group;
+          const children = [...group.children];
+          for (const child of children) {
+            group.remove(child);
+            child.traverse((node) => {
+              const m = node as any;
+              if (m.isMesh) {
+                m.geometry?.dispose?.();
+                if (Array.isArray(m.material)) m.material.forEach((mm: any) => mm?.dispose?.());
+                else m.material?.dispose?.();
+              }
+            });
+          }
+        } catch {}
         // Fit and center
         const box = new THREE.Box3().setFromObject(root);
         const size = new THREE.Vector3();
@@ -416,14 +453,17 @@ export default function TrackVisualClient(props: Props) {
             m.geometry.computeVertexNormals?.();
           }
         });
-        // Add the GLTF root to the scene
-        scene.add(root);
+        // Add the GLTF root into the dedicated model group
+        currentObjectRef.current?.add(root);
         currentObjectRef.current = root;
         setMeshyStatus(null);
         setModelReady(true);
       } catch {
         // ignore and keep fallback primitive
         setMeshyStatus((prev) => prev ?? "meshy failed — using fallback");
+      }
+      finally {
+        modelLoadInProgressRef.current = false;
       }
     };
     // Always try Meshy; it will replace the primitive when ready
@@ -445,12 +485,20 @@ export default function TrackVisualClient(props: Props) {
       if (!isPointerDown) return;
       const dx = (e.clientX - lastX) * 0.005;
       const dy = (e.clientY - lastY) * 0.005;
-      const obj = currentObjectRef.current;
+        const obj = currentObjectRef.current;
       if (!obj) return;
       obj.rotation.y += dx;
       obj.rotation.x += dy;
       lastX = e.clientX;
       lastY = e.clientY;
+      // Safety: ensure model group contains at most one child
+      try {
+        const group = currentObjectRef.current as THREE.Group;
+        if (group && group.children.length > 1) {
+          const extras = group.children.slice(0, -1);
+          extras.forEach((extra) => group.remove(extra));
+        }
+      } catch {}
     };
     container.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("pointerup", onPointerUp);
@@ -469,18 +517,20 @@ export default function TrackVisualClient(props: Props) {
     // animate
     const tick = (t: number) => {
       uniforms.u_time.value = t * 0.001;
-      if (analyser && fftArray && recipe) {
+      const analyserNode = analyserLatestRef.current;
+      const fft = fftLatestRef.current;
+      if (analyserNode && fft && recipe) {
         try {
-          analyser.getByteFrequencyData(
-            fftArray as unknown as Uint8Array<ArrayBuffer>
+          analyserNode.getByteFrequencyData(
+            fft as unknown as Uint8Array<ArrayBuffer>
           );
         } catch {}
         const lowIdx = recipe.audioMapping?.fftBands?.low ?? 2;
         const midIdx = recipe.audioMapping?.fftBands?.mid ?? 24;
         const highIdx = recipe.audioMapping?.fftBands?.high ?? 96;
-        const low = (fftArray as Uint8Array)[lowIdx] ?? 0;
-        const mid = (fftArray as Uint8Array)[midIdx] ?? 0;
-        const high = (fftArray as Uint8Array)[highIdx] ?? 0;
+        const low = (fft as Uint8Array)[lowIdx] ?? 0;
+        const mid = (fft as Uint8Array)[midIdx] ?? 0;
+        const high = (fft as Uint8Array)[highIdx] ?? 0;
         const energy = (low + mid + high) / (3 * 255);
         const baseAmp = (recipe.deformation as any)?.amplitude ?? 0.3;
         const combined = 0.55 * energy + 0.45 * spotifyScalar;
@@ -522,10 +572,26 @@ export default function TrackVisualClient(props: Props) {
       container.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("pointermove", onPointerMove);
+      if (currentObjectRef.current) {
+        try {
+          const group = currentObjectRef.current as THREE.Group;
+          const children = [...group.children];
+          children.forEach((c) => group.remove(c));
+          scene.remove(group);
+        } catch {}
+        currentObjectRef.current = null;
+      }
       material.dispose();
       renderer.dispose();
+      // Remove canvas so we don't accumulate multiple canvases
+      try {
+        if (canvasRef.current && canvasRef.current.parentElement) {
+          canvasRef.current.parentElement.removeChild(canvasRef.current);
+        }
+      } catch {}
+      canvasRef.current = null;
     };
-  }, [recipe, analyser, fftArray, spotifyScalar]);
+  }, [recipe]);
 
   if (error) {
     return (

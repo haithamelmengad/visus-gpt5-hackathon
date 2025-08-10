@@ -3,7 +3,6 @@ import OpenAI from "openai";
 import { z } from "zod";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { cacheGetOrSet } from "@/lib/cache";
 
 const inputSchema = z.object({
   spotifyId: z.string(),
@@ -98,44 +97,19 @@ export async function POST(req: Request) {
     audio_analysis: analysis ?? undefined,
   };
 
-  const system = `You are a senior 3D artist expert at prompting Meshy (text-to-3D). Output ONLY a single-line prompt optimized for Meshy to generate one iconic object that visually represents the song. No extra words.`;
+  const system = `You are a senior 3D artist expert at prompting Meshy (text-to-3D). Output ONLY a single-line prompt.`;
 
-  const guidelines = `Prompt rules:
-- One main object only (no environment, no floor, no background, no camera text).
-- Use concrete nouns (e.g., sunglasses, light bulb, vinyl record, heart, lightning bolt, music note, microphone) and specify distinctive style/material only if useful.
-- Include 2-4 vivid adjectives tied to the song mood and palette.
-- Mention material finish (e.g., glossy plastic, chrome metal, tinted glass), approximate color(s), and silhouette cues.
-- Avoid text, logos, brand names, people, and scenes. Keep neutral pose/orientation.
-- Keep it under 220 characters.`;
+  const guidelines = `Format strictly: "<Artist> — <2-4 words>".
+  - Put the primary artist name FIRST (e.g., "Drake — ...").
+  - After the dash, use only 2-4 short words: a concrete object or motif + 1-2 adjectives at most (e.g., "crown chrome", "heart glass red").
+  - No sentences, no commas, no semicolons, no extra descriptors, no scene words.
+  - One main object only. No people, brands, or logos.`;
 
   const user = `Song context JSON (for reference):\n${JSON.stringify(
     fullContext,
     null,
     2
   )}\n\n${guidelines}\n\nTask: Return ONE SINGLE line Meshy prompt for a 3D object that represents this song.`;
-
-  if (!process.env.OPENAI_API_KEY) {
-    // Deterministic fallback prompt using title and a heuristic
-    const t = fullContext.core.title.toLowerCase();
-    const a = fullContext.core.artist.toLowerCase();
-    const pick = () => {
-      if (/blinding|light/i.test(t))
-        return "sleek sunglasses, tinted violet glass, glossy black frame, neon reflections";
-      if (/heart|love/i.test(t))
-        return "stylized heart, glossy candy red plastic, soft bevels";
-      if (/electric|lightning|thunder/i.test(t))
-        return "lightning bolt, smooth chrome metal, sharp silhouette";
-      if (/vinyl|retro|disco/i.test(t))
-        return "vinyl record, matte black with subtle grooves, small center label";
-      return "abstract music note, glossy midnight blue plastic, minimal";
-    };
-    const prompt = `${pick()} — single object, no scene, neutral lighting`;
-    
-    console.log(`[MESHY] No OpenAI API key, using fallback prompt for "${fullContext.core.title}":`);
-    console.log(`[MESHY] Fallback prompt: "${prompt}"`);
-    
-    return NextResponse.json({ prompt });
-  }
 
   try {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -148,20 +122,42 @@ export async function POST(req: Request) {
     
     console.log(`[MESHY] Generating prompt for track: ${fullContext.core.title} by ${fullContext.core.artist}`);
     console.log(`[MESHY] Using model: ${model}`);
-    const cacheKey = `meshy:prompt:${spotifyId}:${includeAnalysis ? 1 : 0}`;
-    const ttlMs = parseInt(process.env.MESHY_PROMPT_CACHE_TTL_MS || "600000", 10);
-
-    const prompt = await cacheGetOrSet<string>(cacheKey, ttlMs, async () => {
-      const completion = await openai.chat.completions.create({
-        model,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-        response_format: { type: "text" } as any,
-      });
-      return (completion.choices[0]?.message?.content || "").trim();
+    
+    const completion = await openai.chat.completions.create({
+      model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      response_format: { type: "text" } as any,
     });
+    
+    let prompt = (completion.choices[0]?.message?.content || "").trim();
+    // Ensure the primary artist name is present first and condense words after the dash
+    const firstArtist = (fullContext.core.artist || "").split(",")[0]?.trim();
+    if (firstArtist) {
+      const escaped = firstArtist.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
+      const startsWithArtist = new RegExp(`^\n?\s*${escaped}\\b`, "i").test(prompt);
+      if (!startsWithArtist) {
+        const trailingArtist = new RegExp(`\n?\s*—\s*${escaped}\s*$`, "i");
+        prompt = prompt.replace(trailingArtist, "").trim();
+        prompt = `${firstArtist} — ${prompt}`.trim();
+      }
+
+      // Condense the phrase after the dash to 2-4 tokens without punctuation
+      const parts = prompt.split(/—|--|\u2014/);
+      let after = parts.length > 1 ? parts.slice(1).join(" ") : prompt;
+      after = after.replace(/[.,;:!?"'()\[\]{}]/g, " ")
+                   .replace(/\s+/g, " ")
+                   .trim();
+      const maxWords = Math.max(2, Math.min(4, parseInt(process.env.MESHY_PROMPT_WORDS || "3", 10)));
+      const words = after.split(" ").filter(Boolean).slice(0, maxWords);
+      if (words.length > 0) {
+        prompt = `${firstArtist} — ${words.join(" ")}`.trim();
+      } else {
+        prompt = `${firstArtist} — iconic object`;
+      }
+    }
     
     console.log(`[MESHY] OpenAI response for "${fullContext.core.title}":`);
     console.log(`[MESHY] Generated prompt: "${prompt}"`);
@@ -176,3 +172,4 @@ export async function POST(req: Request) {
     });
   }
 }
+
