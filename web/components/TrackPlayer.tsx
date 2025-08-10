@@ -107,7 +107,12 @@ export default function TrackPlayer({
         const ctx = createAudioContext();
         audioCtxRef.current = ctx;
         const source = ctx.createMediaElementSource(audio);
-        const analyser = createAnalyser(ctx, 1024);
+        // Make analyser a bit more responsive by reducing smoothing and widening dB range
+        const analyser = createAnalyser(ctx, 1024, {
+          smoothingTimeConstant: 0.6,
+          minDecibels: -85,
+          maxDecibels: -20,
+        });
         source.connect(analyser);
         analyser.connect(ctx.destination);
         analyserRef.current = analyser;

@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import TrackPlayer from "@/components/TrackPlayer";
+import { processMultiBandFFT, smoothAD } from "@/lib/audio";
 import type { VisualizerRecipe } from "@/types/visualizer";
 
 type Props = {
@@ -158,6 +159,11 @@ export default function TrackVisualClient(props: Props) {
   const lastMidRef = useRef<number>(0);
   const lastHighRef = useRef<number>(0);
   const lastEnergyRef = useRef<number>(0);
+  const lastSubRef = useRef<number>(0);
+  const lastLowMidRef = useRef<number>(0);
+  const lastHighMidRef = useRef<number>(0);
+  const lastTrebleRef = useRef<number>(0);
+  const lastCentroidRef = useRef<number>(0);
 
   // Store dominant colors from album cover
   const [dominantColors, setDominantColors] = useState<THREE.Color[]>([]);
@@ -1554,78 +1560,132 @@ export default function TrackVisualClient(props: Props) {
       const analyserNode = analyserLatestRef.current;
       const fft = fftLatestRef.current;
       if (analyserNode && fft && recipe) {
-        try {
-          analyserNode.getByteFrequencyData(
-            fft as unknown as Uint8Array<ArrayBuffer>
-          );
-        } catch {}
-        // Improved FFT processing for uniform distortion
-        const lowIdx = recipe.audioMapping?.fftBands?.low ?? 2;
-        const midIdx = recipe.audioMapping?.fftBands?.mid ?? 24;
-        const highIdx = recipe.audioMapping?.fftBands?.high ?? 96;
+        // Multi-band FFT with attack/decay smoothing
+        const levels = processMultiBandFFT(analyserNode, fft as Uint8Array);
+        const sub = (lastSubRef.current = smoothAD(
+          levels.sub,
+          lastSubRef.current,
+          0.6,
+          0.2
+        ));
+        const low = (lastLowRef.current = smoothAD(
+          levels.low,
+          lastLowRef.current,
+          0.6,
+          0.2
+        ));
+        const lowMid = (lastLowMidRef.current = smoothAD(
+          levels.lowMid,
+          lastLowMidRef.current,
+          0.55,
+          0.2
+        ));
+        const mid = (lastMidRef.current = smoothAD(
+          levels.mid,
+          lastMidRef.current,
+          0.5,
+          0.2
+        ));
+        const highMid = (lastHighMidRef.current = smoothAD(
+          levels.highMid,
+          lastHighMidRef.current,
+          0.5,
+          0.25
+        ));
+        const high = (lastHighRef.current = smoothAD(
+          levels.high,
+          lastHighRef.current,
+          0.45,
+          0.3
+        ));
+        const treble = (lastTrebleRef.current = smoothAD(
+          levels.treble,
+          lastTrebleRef.current,
+          0.4,
+          0.35
+        ));
+        const centroid = (lastCentroidRef.current = smoothAD(
+          levels.spectralCentroid ?? 0,
+          lastCentroidRef.current,
+          0.6,
+          0.3
+        ));
 
-        // Get frequency band values with smoothing
-        const low = (fft as Uint8Array)[lowIdx] ?? 0;
-        const mid = (fft as Uint8Array)[midIdx] ?? 0;
-        const high = (fft as Uint8Array)[highIdx] ?? 0;
-
-        // Apply smoothing to reduce spiky behavior
-        const smoothingFactor = 0.85;
-        const smoothedLow = (low + (lastLowRef.current ?? low)) / 2;
-        const smoothedMid = (mid + (lastMidRef.current ?? mid)) / 2;
-        const smoothedHigh = (high + (lastHighRef.current ?? high)) / 2;
-
-        // Store for next frame
-        lastLowRef.current = smoothedLow;
-        lastMidRef.current = smoothedMid;
-        lastHighRef.current = smoothedHigh;
-
-        // Calculate energy with better normalization and smoothing
-        const energy = (smoothedLow + smoothedMid + smoothedHigh) / (3 * 255);
-        const smoothedEnergy = THREE.MathUtils.lerp(
-          lastEnergyRef.current ?? energy,
-          energy,
-          1 - smoothingFactor
-        );
-        lastEnergyRef.current = smoothedEnergy;
+        const energy = (lastEnergyRef.current = smoothAD(
+          levels.energy,
+          lastEnergyRef.current,
+          0.6,
+          0.25
+        ));
 
         const baseAmp =
           (recipe.deformation as { amplitude?: number } | undefined)
             ?.amplitude ?? 0.3;
-        const combined = 0.55 * smoothedEnergy + 0.45 * spotifyScalar;
+        const combined = 0.55 * energy + 0.45 * spotifyScalar;
         const amplitude = baseAmp * combined;
-
-        // Intentionally disable any per-vertex/skeleton deformation; we only do uniform scaling
 
         const obj = currentObjectRef.current;
         if (obj) {
-          // Always enforce single-axis rotation constraint (y-axis)
+          // Lock axes except y; allow gentle z sway from highMid
           obj.rotation.x = 0;
-          obj.rotation.z = 0;
-          // Rotate only while audio is playing; lock to y-axis; speed scaled by BPM
+          // Rotate around y with BPM, modulated by sub/low for groove
           if (isPlayingRef.current) {
             const bpm = tempoRef.current || 120;
-            // Base radians/sec from BPM: one full rotation every 8 beats
             const baseRadsPerSec = ((bpm / 60) * (2 * Math.PI)) / 8;
-            // Mild modulation with energy
-            const radsPerSec = baseRadsPerSec * (0.9 + 0.2 * energy);
-            // Approximate frame delta using requestAnimationFrame timestamp
+            const groove = 0.8 + 0.4 * Math.min(1, sub * 0.7 + low * 0.3);
+            const radsPerSec = baseRadsPerSec * groove;
             const now = performance.now();
             let dt = (now - (lastTickTimeRef.current || now)) / 1000;
             lastTickTimeRef.current = now;
-            // Clamp delta to avoid large jumps when tab was inactive
             dt = Math.min(0.05, Math.max(0.001, dt));
             obj.rotation.y += radsPerSec * dt;
+            // subtle z sway from highMid/treble
+            const zSway =
+              (highMid * 0.06 + treble * 0.04) * (isPlayingRef.current ? 1 : 0);
+            obj.rotation.z = THREE.MathUtils.lerp(obj.rotation.z, zSway, 0.2);
+          } else {
+            obj.rotation.z = 0;
           }
 
-          // Audio-reactive uniform scale around the original fitted scale
-          // When playing, reduce baseline by 20% but keep FFT delta unchanged
+          // Per-axis scaling for multi-variate response
           const basePulse = isPlayingRef.current ? 0.8 : 1.0;
-          const scalePulse = basePulse + 0.25 * energy;
-          const target = baseScaleRef.current * scalePulse;
-          // Smooth a bit to avoid jitter
-          const lerp = THREE.MathUtils.lerp(obj.scale.x, target, 0.25);
-          obj.scale.setScalar(lerp);
+          const pulseX = basePulse + 0.35 * low; // bass widens
+          const pulseY = basePulse + 0.3 * mid; // body breathes
+          const pulseZ = basePulse + 0.25 * high; // treble sharpens
+          const targetX = baseScaleRef.current * pulseX;
+          const targetY = baseScaleRef.current * pulseY;
+          const targetZ = baseScaleRef.current * pulseZ;
+          obj.scale.x = THREE.MathUtils.lerp(obj.scale.x, targetX, 0.2);
+          obj.scale.y = THREE.MathUtils.lerp(obj.scale.y, targetY, 0.2);
+          obj.scale.z = THREE.MathUtils.lerp(obj.scale.z, targetZ, 0.2);
+
+          // Apply displacement modifier if present on child meshes
+          const timeMs = performance.now();
+          obj.traverse((node) => {
+            const mesh = node as THREE.Mesh & { userData?: any };
+            const mod = (mesh?.userData || {}).displacementModifier as
+              | { apply?: (t: number, a: number) => void }
+              | undefined;
+            if (mod?.apply) {
+              // Modulate amplitude by centroid to shift character over time
+              const centroidBoost = 0.7 + 0.6 * centroid;
+              mod.apply(timeMs * 0.001, amplitude * centroidBoost);
+            }
+          });
+
+          // Adjust light intensities slightly by bands for vibrancy
+          scene.traverse((lightObj) => {
+            const light = lightObj as THREE.Light & { isLight?: boolean };
+            if ((light as any).isLight) {
+              const base = 1.0;
+              const bump = 0.3 * energy + 0.2 * highMid + 0.15 * treble;
+              light.intensity = THREE.MathUtils.lerp(
+                light.intensity,
+                base + bump,
+                0.15
+              );
+            }
+          });
         }
       }
       renderer.render(scene, camera);
