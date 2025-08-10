@@ -29,7 +29,7 @@
    ```bash
    SPOTIFY_CLIENT_ID=your_spotify_client_id
    SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
-   NEXTAUTH_SECRET=your_random_string # e.g. `openssl rand -base64 32`
+   NEXTAUTH_SECRET=your_random_string
    NEXTAUTH_URL=http://localhost:3000
    OPENAI_API_KEY=your_openai_api_key
    OPENAI_MODEL=gpt5
