@@ -13,6 +13,8 @@ type Props = {
   onLevelChange?: (level01: number) => void;
   onPlayingChange?: (isPlaying: boolean) => void;
   onAnalyserReady?: (analyser: AnalyserNode) => void;
+  // When this number changes, attempt to autoplay
+  autoPlaySignal?: number;
 };
 
 export default function TrackPlayer({
@@ -24,6 +26,7 @@ export default function TrackPlayer({
   onLevelChange,
   onPlayingChange,
   onAnalyserReady,
+  autoPlaySignal,
 }: Props) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [autoplayError, setAutoplayError] = useState<string | null>(null);
@@ -82,6 +85,18 @@ export default function TrackPlayer({
       audio.removeEventListener("timeupdate", onTime);
     };
   }, [onPlayingChange]);
+
+  // Attempt autoplay when requested by parent
+  const lastAutoPlaySignalRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (typeof autoPlaySignal !== "number") return;
+    if (lastAutoPlaySignalRef.current === autoPlaySignal) return;
+    lastAutoPlaySignalRef.current = autoPlaySignal;
+    // Only try if we have a preview URL
+    if (!previewUrl) return;
+    // Fire and forget; errors are handled within handleManualPlay
+    void handleManualPlay();
+  }, [autoPlaySignal, previewUrl]);
 
   const handleManualPlay = async () => {
     const audio = audioRef.current;

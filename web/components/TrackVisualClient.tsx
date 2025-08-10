@@ -140,6 +140,8 @@ export default function TrackVisualClient(props: Props) {
   const isPlayingRef = useRef<boolean>(false);
   const lastTickTimeRef = useRef<number>(0);
   const tempoRef = useRef<number>(120);
+  // Signal to request autoplay from TrackPlayer when model becomes ready
+  const [autoPlaySignal, setAutoPlaySignal] = useState(0);
 
   // Keep latest tempo (BPM) available for the render loop
   useEffect(() => {
@@ -163,6 +165,11 @@ export default function TrackVisualClient(props: Props) {
   useEffect(() => {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
+
+  // Trigger autoplay attempt once the model is ready
+  useEffect(() => {
+    if (modelReady) setAutoPlaySignal((s) => s + 1);
+  }, [modelReady]);
 
   // Extract dominant colors from album cover when available
   useEffect(() => {
@@ -955,6 +962,8 @@ export default function TrackVisualClient(props: Props) {
             `[CLIENT] Falling back to preview model due to refine error`
           );
           modelUrl = previewModelUrl;
+          // Preview already displayed; stop here
+          return;
         } else {
           const refineJson = (await refineRes.json()) as {
             id?: string;
@@ -1002,7 +1011,8 @@ export default function TrackVisualClient(props: Props) {
                   "refinement complete - high quality model loaded"
                 );
 
-                break;
+                // Refined model loaded via unified path; skip duplicate loader below
+                return;
               }
               if (j.status && /failed|canceled/i.test(j.status)) {
                 console.log(
@@ -1018,12 +1028,16 @@ export default function TrackVisualClient(props: Props) {
                 `[CLIENT] REFINE generation did not complete, falling back to preview model`
               );
               modelUrl = previewModelUrl;
+              // Preview already displayed; stop here
+              return;
             }
           } else {
             console.log(
               `[CLIENT] REFINE request failed to return ID, falling back to preview model`
             );
             modelUrl = previewModelUrl;
+            // Preview already displayed; stop here
+            return;
           }
         }
 
@@ -1576,18 +1590,7 @@ export default function TrackVisualClient(props: Props) {
         const combined = 0.55 * smoothedEnergy + 0.45 * spotifyScalar;
         const amplitude = baseAmp * combined;
 
-        // Update displacement for all meshes using the new modifier system
-        if (currentObjectRef.current) {
-          currentObjectRef.current.traverse((obj: THREE.Object3D) => {
-            if (
-              obj instanceof THREE.Mesh &&
-              obj.userData.displacementModifier
-            ) {
-              const modifier = obj.userData.displacementModifier;
-              modifier.apply(time, amplitude);
-            }
-          });
-        }
+        // Intentionally disable any per-vertex/skeleton deformation; we only do uniform scaling
 
         const obj = currentObjectRef.current;
         if (obj) {
@@ -1611,7 +1614,9 @@ export default function TrackVisualClient(props: Props) {
           }
 
           // Audio-reactive uniform scale around the original fitted scale
-          const scalePulse = 1 + 0.25 * energy; // 0–25% growth
+          // When playing, reduce baseline by 20% but keep FFT delta unchanged
+          const basePulse = isPlayingRef.current ? 0.8 : 1.0;
+          const scalePulse = basePulse + 0.25 * energy;
           const target = baseScaleRef.current * scalePulse;
           // Smooth a bit to avoid jitter
           const lerp = THREE.MathUtils.lerp(obj.scale.x, target, 0.25);
