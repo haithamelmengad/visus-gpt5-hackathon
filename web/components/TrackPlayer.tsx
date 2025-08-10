@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { formatTime, BUTTONS } from "@/lib/styles";
+import {
+  createAudioContext,
+  createAnalyser,
+  processFFTData,
+} from "@/lib/audio";
 
 type Props = {
   title: string;
@@ -87,13 +93,10 @@ export default function TrackPlayer({
     try {
       // Lazily create AudioContext and analyser on first play to satisfy policies
       if (!audioCtxRef.current) {
-        const ctx = new (window.AudioContext ||
-          (window as any).webkitAudioContext)();
+        const ctx = createAudioContext();
         audioCtxRef.current = ctx;
         const source = ctx.createMediaElementSource(audio);
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 1024; // Larger FFT for smoother frequency resolution
-        analyser.smoothingTimeConstant = 0.9; // Higher smoothing for more uniform data
+        const analyser = createAnalyser(ctx, 1024);
         source.connect(analyser);
         analyser.connect(ctx.destination);
         analyserRef.current = analyser;
@@ -149,25 +152,7 @@ export default function TrackPlayer({
     }
   };
 
-  const formatTime = (sec: number) => {
-    if (!isFinite(sec) || sec <= 0) return "0:00";
-    const m = Math.floor(sec / 60);
-    const s = Math.floor(sec % 60);
-    return `${m}:${s.toString().padStart(2, "0")}`;
-  };
-
-  const controlPillBase: React.CSSProperties = {
-    width: 34,
-    height: 34,
-    borderRadius: 18,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    background: "#1b1b1f",
-    color: "#d8d8de",
-    border: "1px solid rgba(255,255,255,0.06)",
-    cursor: "pointer",
-  };
+  const controlPillBase = BUTTONS.control;
 
   const progressOuter: React.CSSProperties = {
     width: "100%",

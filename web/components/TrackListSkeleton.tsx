@@ -1,4 +1,5 @@
 import React from "react";
+import { createShimmerStyle, COLORS } from "@/lib/styles";
 
 interface TrackListSkeletonProps {
   count?: number;
@@ -26,47 +27,32 @@ export default function TrackListSkeleton({
     marginBottom: 6,
   };
 
-  const shimmerStyle: React.CSSProperties = {
-    background: "linear-gradient(90deg, #2a2a2f 25%, #3a3a3f 50%, #2a2a2f 75%)",
-    backgroundSize: "200% 100%",
-    animation: "shimmer 1.5s infinite",
-    borderRadius: "inherit",
-  };
-
-  const albumImageSkeletonStyle: React.CSSProperties = {
+  const albumImageSkeletonStyle = createShimmerStyle({
     width: 48,
     height: 48,
     borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.08)",
-    background: "linear-gradient(90deg, #2a2a2f 25%, #3a3a3f 50%, #2a2a2f 75%)",
-    backgroundSize: "200% 100%",
-    animation: "shimmer 1.5s infinite",
-  };
+    border: COLORS.border.primary,
+  });
 
-  const textSkeletonStyle: React.CSSProperties = {
-    ...shimmerStyle,
+  const titleSkeletonStyle = createShimmerStyle({
     height: 12,
-    borderRadius: 6,
-  };
-
-  const titleSkeletonStyle: React.CSSProperties = {
-    ...textSkeletonStyle,
     width: 160,
     marginBottom: 2,
-  };
+    borderRadius: 6,
+  });
 
-  const artistSkeletonStyle: React.CSSProperties = {
-    ...textSkeletonStyle,
+  const artistSkeletonStyle = createShimmerStyle({
+    height: 12,
     width: 120,
-  };
+    borderRadius: 6,
+  });
 
-  const playButtonSkeletonStyle: React.CSSProperties = {
+  const playButtonSkeletonStyle = createShimmerStyle({
     width: 28,
     height: 28,
     borderRadius: 16,
-    border: "1px solid rgba(255,255,255,0.06)",
-    ...shimmerStyle,
-  };
+    border: COLORS.border.secondary,
+  });
 
   return (
     <div className={className}>

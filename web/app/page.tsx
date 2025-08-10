@@ -4,6 +4,7 @@ import { signIn, signOut, useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import TrackListSkeleton from "@/components/TrackListSkeleton";
 import LoginSkeleton from "@/components/LoginSkeleton";
+import { COLORS, LAYOUTS, PANELS, BUTTONS } from "@/lib/styles";
 
 type RecentPlayedItem = {
   track: {
@@ -51,40 +52,23 @@ export default function Home() {
   }, [session]);
 
   const gradientBg: React.CSSProperties = {
-    minHeight: "100vh",
-    display: "flex",
-    flexDirection: "column",
+    ...LAYOUTS.fullHeight,
     alignItems: "center",
     justifyContent: "flex-start",
-    background:
-      "radial-gradient(60% 60% at 50% 20%, rgba(80,38,125,0.45) 0%, rgba(18,12,24,0.85) 48%, #07070a 100%)",
+    background: COLORS.background.gradient,
     padding: 24,
-  };
-
-  const panelStyle: React.CSSProperties = {
-    width: 560,
-    maxWidth: "100%",
-    background:
-      "linear-gradient(180deg, rgba(22,22,26,0.94), rgba(12,12,16,0.96))",
-    border: "1px solid rgba(255,255,255,0.08)",
-    borderRadius: 18,
-    boxShadow: "0 10px 40px rgba(0,0,0,0.55)",
-    padding: 16,
-    color: "#eaeaea",
   };
 
   const centerWrap: React.CSSProperties = {
     flex: 1,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    ...LAYOUTS.centered,
     width: "100%",
   };
 
   const footerStyle: React.CSSProperties = {
     textAlign: "center",
     marginTop: 14,
-    color: "#9aa0a6",
+    color: COLORS.text.muted,
     fontSize: 12,
   };
 
@@ -97,7 +81,7 @@ export default function Home() {
     return (
       <div style={gradientBg}>
         <div style={centerWrap}>
-          <div style={panelStyle}>
+          <div style={PANELS.main}>
             <LoginSkeleton />
           </div>
         </div>
@@ -107,9 +91,7 @@ export default function Home() {
   }
 
   const titleRowStyle: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    ...LAYOUTS.spaceBetween,
     padding: "8px 10px 12px 10px",
   };
 
@@ -117,21 +99,6 @@ export default function Home() {
     listStyle: "none",
     padding: 6,
     margin: 0,
-  };
-
-  // Buttons
-  const buttonBase: React.CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 8,
-    padding: "10px 14px",
-    borderRadius: 12,
-    color: "#eaeaea",
-    fontWeight: 600,
-    fontSize: 14,
-    cursor: "pointer",
-    transition:
-      "transform 120ms ease, box-shadow 120ms ease, background 160ms ease, border-color 160ms ease",
   };
 
   const signOutBtn: React.CSSProperties = {
@@ -153,7 +120,7 @@ export default function Home() {
     return (
       <div style={gradientBg}>
         <div style={centerWrap}>
-          <div style={panelStyle}>
+          <div style={PANELS.main}>
             <div style={{ textAlign: "center", padding: 10 }}>
               <h2 style={{ margin: 0, fontSize: 32, lineHeight: 1.15 }}>
                 Visualize your favorite
@@ -161,22 +128,7 @@ export default function Home() {
                 music
               </h2>
               <div style={{ height: 16 }} />
-              <button
-                onClick={() => signIn("spotify")}
-                style={{
-                  display: "inline-block",
-                  background: "#1DB954",
-                  color: "#08130a",
-                  fontWeight: 700,
-                  border: "1px solid #1ed760",
-                  borderRadius: 12,
-                  padding: "14px 22px",
-                  width: 360,
-                  maxWidth: "100%",
-                  boxShadow: "0 6px 20px rgba(29,185,84,0.35)",
-                  cursor: "pointer",
-                }}
-              >
+              <button onClick={() => signIn("spotify")} style={BUTTONS.spotify}>
                 Connect Spotify
               </button>
             </div>
@@ -190,7 +142,7 @@ export default function Home() {
   return (
     <div style={gradientBg}>
       <div style={centerWrap}>
-        <div style={panelStyle}>
+        <div style={PANELS.main}>
           <div style={titleRowStyle}>
             <h2 style={{ margin: 0 }}>Recently Played</h2>
             <div style={{ display: "flex", gap: 8 }}>
@@ -221,11 +173,19 @@ export default function Home() {
 
           {loading && <TrackListSkeleton count={8} />}
           {error && (
-            <p style={{ padding: "0 10px", color: "#ff8585" }}>{error}</p>
+            <p style={{ padding: "0 10px", color: COLORS.text.error }}>
+              {error}
+            </p>
           )}
 
           {items.length === 0 && !loading && !error && (
-            <div style={{ color: "#9aa0a6", marginTop: 8, padding: "0 10px" }}>
+            <div
+              style={{
+                color: COLORS.text.muted,
+                marginTop: 8,
+                padding: "0 10px",
+              }}
+            >
               No recently played tracks returned. Try playing a track in
               Spotify, then click Refresh.
             </div>
@@ -263,7 +223,7 @@ export default function Home() {
                 justifyContent: "center",
                 background: hovered ? "#2a2a2f" : "#1b1b1f",
                 color: "#d8d8de",
-                border: "1px solid rgba(255,255,255,0.06)",
+                border: COLORS.border.secondary,
                 flex: "0 0 auto",
               };
               return (
@@ -299,20 +259,25 @@ export default function Home() {
                           style={{
                             borderRadius: 10,
                             objectFit: "cover",
-                            border: "1px solid rgba(255,255,255,0.08)",
+                            border: COLORS.border.primary,
                           }}
                         />
                         <div>
                           <div
                             style={{
                               fontSize: 12,
-                              color: "#9aa0a6",
+                              color: COLORS.text.muted,
                               marginBottom: 2,
                             }}
                           >
                             {artistNames}
                           </div>
-                          <div style={{ fontWeight: 600, color: "#f2f2f7" }}>
+                          <div
+                            style={{
+                              fontWeight: 600,
+                              color: COLORS.text.primary,
+                            }}
+                          >
                             {item.track.name}
                           </div>
                         </div>

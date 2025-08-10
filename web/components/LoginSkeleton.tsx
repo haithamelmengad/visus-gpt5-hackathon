@@ -1,4 +1,5 @@
 import React from "react";
+import { createShimmerStyle } from "@/lib/styles";
 
 interface LoginSkeletonProps {
   className?: string;
@@ -9,29 +10,20 @@ interface LoginSkeletonProps {
  * and logout transitions, matching the visual structure of the actual login UI
  */
 export default function LoginSkeleton({ className = "" }: LoginSkeletonProps) {
-  const shimmerStyle: React.CSSProperties = {
-    background: "linear-gradient(90deg, #2a2a2f 25%, #3a3a3f 50%, #2a2a2f 75%)",
-    backgroundSize: "200% 100%",
-    animation: "shimmer 1.5s infinite",
-    borderRadius: "inherit",
-  };
-
-  const titleSkeletonStyle: React.CSSProperties = {
-    ...shimmerStyle,
+  const titleSkeletonStyle = createShimmerStyle({
     height: 32,
     width: 280,
     margin: "0 auto 16px auto",
     borderRadius: 8,
-  };
+  });
 
-  const buttonSkeletonStyle: React.CSSProperties = {
-    ...shimmerStyle,
+  const buttonSkeletonStyle = createShimmerStyle({
     height: 48,
     width: 360,
     maxWidth: "100%",
     borderRadius: 12,
     margin: "0 auto",
-  };
+  });
 
   return (
     <div className={className}>
