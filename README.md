@@ -2,6 +2,12 @@
 
 3D, audio–reactive visualizer for Spotify tracks. The web app lives in `web/` and is a Next.js App Router project. It generates a procedural 3D model for a track and animates it to the audio preview.
 
+### OpenAI API usage in this project:
+Uses `chat.completions.create` to build a single-line Meshy prompt from Spotify data in the format `Artist — <2-4 keywords>`
+
+#### Post-processing of the AI output
+Ensures the first artist is prefixed, strips punctuation, and enforces 2–4 tokens after the dash
+
 ### Prerequisites
 - Node.js 20+ and npm 10+
 - Spotify Developer application (SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET)
