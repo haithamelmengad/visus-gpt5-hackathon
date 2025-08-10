@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { cacheGetOrSet, cacheSet } from "@/lib/cache";
+import { cacheGet, cacheGetOrSet, cacheSet } from "@/lib/cache";
 
 const inputSchema = z.object({
   prompt: z.string().min(8),
@@ -124,6 +124,19 @@ export async function POST(req: Request) {
       JSON.stringify(rigParams, null, 2)
     );
 
+    // Fast path: if rigging generation was previously created for this track, reuse it
+    const existingRig = cacheGet<{ id: string }>(`meshy:rig:${spotifyId}`);
+    if (existingRig && typeof existingRig?.id === "string") {
+      return NextResponse.json({
+        id: existingRig.id,
+        mode: "rigged",
+        animationType,
+        riggingStyle,
+        musicFeatures,
+        spotifyId,
+      });
+    }
+
     const { status, json } = await cacheGetOrSet<{
       status: number;
       json: Record<string, unknown>;
@@ -186,6 +199,13 @@ export async function POST(req: Request) {
           timestamp: Date.now(),
         },
         parseInt(process.env.MESHY_RIG_CACHE_TTL_MS || "86400000", 10) // 24h default
+      );
+
+      // Map generation id back to spotifyId so status can persist model URL by track
+      cacheSet(
+        `meshy:genToTrack:${idCandidate}`,
+        spotifyId,
+        parseInt(process.env.MESHY_ID_TO_TRACK_TTL_MS || "172800000", 10)
       );
 
       return NextResponse.json({

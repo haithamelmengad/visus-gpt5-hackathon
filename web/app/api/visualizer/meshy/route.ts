@@ -3,7 +3,7 @@ import OpenAI from "openai";
 import { z } from "zod";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { cacheGetOrSet, cacheGet } from "@/lib/cache";
+import { cacheGetOrSet, cacheGet, cacheSet } from "@/lib/cache";
 
 const inputSchema = z.object({
   spotifyId: z.string(),
@@ -19,10 +19,38 @@ export async function POST(req: Request) {
 
   const { spotifyId, includeAnalysis } = parsed.data;
 
+  // Keys for prompt caching
+  const promptCompletionKey = `meshy:prompt:${spotifyId}:analysis:${
+    includeAnalysis ? 1 : 0
+  }`;
+  const promptTextKey = `meshy:promptText:${spotifyId}:analysis:${
+    includeAnalysis ? 1 : 0
+  }`;
+
   // Fast path: if we already have a cached model URL for this track, return it immediately
   const cachedModelUrl = cacheGet<string>(`meshy:modelUrl:${spotifyId}`);
   if (cachedModelUrl && typeof cachedModelUrl === "string") {
-    return NextResponse.json({ modelUrl: cachedModelUrl });
+    // Also try to return a prompt so the client can proceed with preview+refine workflow
+    let cachedPrompt = cacheGet<string>(promptTextKey);
+    if (!cachedPrompt) {
+      const completionCached = cacheGet<any>(promptCompletionKey);
+      if (
+        completionCached &&
+        completionCached?.choices?.[0]?.message?.content
+      ) {
+        cachedPrompt = String(
+          completionCached.choices[0].message.content
+        ).trim();
+      }
+    }
+    // As a last resort, synthesize a minimal placeholder prompt
+    if (!cachedPrompt) {
+      cachedPrompt = "iconic object minimal";
+    }
+    return NextResponse.json({
+      modelUrl: cachedModelUrl,
+      prompt: cachedPrompt,
+    });
   }
 
   // Enrich with Spotify like the recipe route
@@ -134,7 +162,7 @@ export async function POST(req: Request) {
 
     // Cache the generated prompt by spotifyId so we reuse the same Meshy prompt across sessions
     const completion = await cacheGetOrSet(
-      `meshy:prompt:${spotifyId}:analysis:${includeAnalysis ? 1 : 0}`,
+      promptCompletionKey,
       parseInt(process.env.MESHY_PROMPT_CACHE_TTL_MS || "86400000", 10), // 24h default
       async () =>
         openai.chat.completions.create({
@@ -179,6 +207,15 @@ export async function POST(req: Request) {
         prompt = `${firstArtist} — iconic object`;
       }
     }
+
+    // Persist the normalized prompt string for quick retrieval alongside modelUrl
+    try {
+      cacheSet(
+        promptTextKey,
+        prompt,
+        parseInt(process.env.MESHY_PROMPT_CACHE_TTL_MS || "86400000", 10)
+      );
+    } catch {}
 
     console.log(`[MESHY] OpenAI response for "${fullContext.core.title}":`);
     console.log(`[MESHY] Generated prompt: "${prompt}"`);

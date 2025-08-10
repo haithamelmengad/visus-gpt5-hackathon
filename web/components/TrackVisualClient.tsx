@@ -727,7 +727,11 @@ export default function TrackVisualClient(props: Props) {
         const startRes = await fetch(`/api/visualizer/meshy/start`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, mode: "preview" }),
+          body: JSON.stringify({
+            prompt,
+            mode: "preview",
+            spotifyId: props.spotifyId,
+          }),
         });
 
         if (!startRes.ok) {
@@ -941,6 +945,7 @@ export default function TrackVisualClient(props: Props) {
             prompt: promptJson.prompt, // Optional: can override prompt for refinement
             enablePbr: true,
             topology: "triangle",
+            spotifyId: props.spotifyId,
           }),
         });
 

@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { cacheGetOrSet, cacheSet } from "@/lib/cache";
+import { cacheGet, cacheGetOrSet, cacheSet } from "@/lib/cache";
 
 const inputSchema = z.object({
   prompt: z.string().min(8),
   mode: z.enum(["preview", "refine"]).optional().default("preview"),
   previewId: z.string().optional(), // Required when mode is "refine"
+  spotifyId: z.string().optional(), // Stable key for caching
 });
 
 /**
@@ -35,7 +36,7 @@ export async function POST(req: Request) {
   if (!parsed.success)
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
 
-  const { prompt, mode, previewId } = parsed.data;
+  const { prompt, mode, previewId, spotifyId } = parsed.data;
 
   // Validate that previewId is provided when mode is "refine"
   if (mode === "refine" && !previewId) {
@@ -97,6 +98,34 @@ export async function POST(req: Request) {
       JSON.stringify(enhancedParams, null, 2)
     );
 
+    // Fast path: if we already have a generation ID for these inputs, return it immediately
+    if (mode === "refine" && previewId) {
+      const existingRefineId = cacheGet<string>(
+        `meshy:refinement:${previewId}`
+      );
+      if (existingRefineId && typeof existingRefineId === "string") {
+        return NextResponse.json({
+          id: existingRefineId,
+          mode: "refine",
+          previewId,
+        });
+      }
+    }
+    if (mode === "preview") {
+      // Prefer stable lookup by spotifyId if provided
+      if (spotifyId) {
+        const byTrack = cacheGet<string>(`meshy:previewByTrack:${spotifyId}`);
+        if (byTrack && typeof byTrack === "string") {
+          return NextResponse.json({ id: byTrack, mode: "preview" });
+        }
+      }
+      // Fallback to prompt mapping
+      const byPrompt = cacheGet<string>(`meshy:previewByPrompt:${prompt}`);
+      if (byPrompt && typeof byPrompt === "string") {
+        return NextResponse.json({ id: byPrompt, mode: "preview" });
+      }
+    }
+
     const { status, json } = await cacheGetOrSet<{
       status: number;
       json: Record<string, unknown>;
@@ -152,6 +181,29 @@ export async function POST(req: Request) {
           `meshy:preview:${idCandidate}`,
           { prompt, timestamp: Date.now() },
           parseInt(process.env.MESHY_PREVIEW_CACHE_TTL_MS || "86400000", 10) // 24h default
+        );
+        // Also map prompt -> preview id for fast lookup across sessions
+        cacheSet(
+          `meshy:previewByPrompt:${prompt}`,
+          idCandidate,
+          parseInt(process.env.MESHY_PREVIEW_CACHE_TTL_MS || "86400000", 10)
+        );
+        // If a track ID was provided, bind it to this preview id for stability
+        if (spotifyId) {
+          cacheSet(
+            `meshy:previewByTrack:${spotifyId}`,
+            idCandidate,
+            parseInt(process.env.MESHY_PREVIEW_CACHE_TTL_MS || "86400000", 10)
+          );
+        }
+      }
+
+      // Map generation id back to spotifyId when available so status can persist model URL by track
+      if (spotifyId && typeof idCandidate === "string") {
+        cacheSet(
+          `meshy:genToTrack:${idCandidate}`,
+          spotifyId,
+          parseInt(process.env.MESHY_ID_TO_TRACK_TTL_MS || "172800000", 10) // 48h
         );
       }
 

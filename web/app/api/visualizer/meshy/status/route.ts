@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { cacheGetOrSet, cacheSet } from "@/lib/cache";
+import { cacheGet, cacheGetOrSet, cacheSet } from "@/lib/cache";
 
 // GET /api/visualizer/meshy/status?id=...
 export async function GET(req: Request) {
@@ -148,7 +148,10 @@ export async function GET(req: Request) {
         }
       }
       const sid = json?.task_id || json?.id || id;
-      const trackId = json?.metadata?.spotifyId || json?.spotifyId; // best-effort if backend echoes it
+      // Resolve track id via mapping first, then fall back to response metadata
+      const mappedTrackId = cacheGet<string>(`meshy:genToTrack:${sid}`);
+      const trackId =
+        mappedTrackId || json?.metadata?.spotifyId || json?.spotifyId;
       if (
         typeof modelUrl === "string" &&
         modelUrl &&

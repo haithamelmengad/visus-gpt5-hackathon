@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { cacheGetOrSet, cacheSet } from "@/lib/cache";
+import { cacheGet, cacheGetOrSet, cacheSet } from "@/lib/cache";
 
 const inputSchema = z.object({
   previewId: z.string().min(1),
   prompt: z.string().optional(), // Optional override prompt for refinement
   enablePbr: z.boolean().optional().default(true),
   topology: z.enum(["triangle", "quad"]).optional().default("triangle"),
+  spotifyId: z.string().optional(), // Stable key for caching
 });
 
 // Refines a preview generation to get the final high-quality 3D model
@@ -16,7 +17,7 @@ export async function POST(req: Request) {
   if (!parsed.success)
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
 
-  const { previewId, prompt, enablePbr, topology } = parsed.data;
+  const { previewId, prompt, enablePbr, topology, spotifyId } = parsed.data;
   const apiKey = process.env.MESHY_API_KEY;
 
   console.log(
@@ -76,6 +77,16 @@ export async function POST(req: Request) {
       JSON.stringify(refineParams, null, 2)
     );
 
+    // Fast path: if we have a refinement id for this previewId, reuse it
+    const existingRefineId = cacheGet<string>(`meshy:refinement:${previewId}`);
+    if (existingRefineId && typeof existingRefineId === "string") {
+      return NextResponse.json({
+        id: existingRefineId,
+        previewId,
+        mode: "refine",
+      });
+    }
+
     const { status, json } = await cacheGetOrSet<{
       status: number;
       json: Record<string, unknown>;
@@ -132,11 +143,16 @@ export async function POST(req: Request) {
         parseInt(process.env.MESHY_REFINEMENT_CACHE_TTL_MS || "86400000", 10) // 24h default
       );
 
-      return NextResponse.json({
-        id: idCandidate,
-        previewId,
-        mode: "refine",
-      });
+      // Map generation id back to spotifyId when available so status can persist model URL by track
+      if (spotifyId && typeof idCandidate === "string") {
+        cacheSet(
+          `meshy:genToTrack:${idCandidate}`,
+          spotifyId,
+          parseInt(process.env.MESHY_ID_TO_TRACK_TTL_MS || "172800000", 10) // 48h
+        );
+      }
+
+      return NextResponse.json({ id: idCandidate, previewId, mode: "refine" });
     }
 
     // If we cannot find an id, return a 502 with the raw for debugging
