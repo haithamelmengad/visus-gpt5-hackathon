@@ -17,6 +17,11 @@ export const metadata: Metadata = {
   title: "Visus - 3D Music Visualizer",
   description:
     "Interactive 3D visualizations for your Spotify tracks. Experience your music in a whole new dimension.",
+  icons: {
+    icon: "/visusfav.svg",
+    shortcut: "/visusfav.svg",
+    apple: "/visusfav.svg",
+  },
 };
 
 export default function RootLayout({
