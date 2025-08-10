@@ -12,13 +12,21 @@ export async function POST(req: Request) {
 
   const { prompt } = parsed.data;
   const apiKey = process.env.MESHY_API_KEY;
-  if (!apiKey)
+  
+  console.log(`[MESHY START] Starting 3D generation with prompt: "${prompt}"`);
+  console.log(`[MESHY START] Prompt length: ${prompt.length} characters`);
+  
+  if (!apiKey) {
+    console.log(`[MESHY START] Error: Missing MESHY_API_KEY environment variable`);
     return NextResponse.json(
       { error: "Missing MESHY_API_KEY" },
       { status: 500 }
     );
+  }
 
   try {
+    console.log(`[MESHY START] Calling Meshy API with key: ${apiKey.substring(0, 8)}...`);
+
     const res = await fetch("https://api.meshy.ai/v2/text-to-3d", {
       method: "POST",
       headers: {
@@ -32,9 +40,37 @@ export async function POST(req: Request) {
         enable_pbr: true,
       }),
     });
+
     const json = await res.json();
+
+    console.log(`[MESHY START] Meshy API response status: ${res.status}`);
+    console.log(`[MESHY START] Meshy API response:`, JSON.stringify(json, null, 2));
+
     if (!res.ok) return NextResponse.json(json, { status: res.status });
-    return NextResponse.json(json);
+
+    // Normalize Meshy response to always return { id } for client polling
+    // Meshy may return various shapes; try common possibilities.
+    let idCandidate =
+      (json && (json.id || json.task_id || json.generation_id)) ||
+      (json?.result && (json.result.id || json.result.task_id)) ||
+      (json?.data && (json.data.id || json.data.task_id));
+
+    // Meshy sometimes returns { result: "<generation-id>" }
+    if (!idCandidate && typeof json?.result === "string") {
+      idCandidate = json.result;
+    }
+
+    if (typeof idCandidate === "string" && idCandidate.trim().length > 0) {
+      console.log(`[MESHY START] Normalized generation ID: ${idCandidate}`);
+      return NextResponse.json({ id: idCandidate });
+    }
+
+    // If we cannot find an id, return a 502 with the raw for debugging
+    console.log(`[MESHY START] Could not find generation id in response.`);
+    return NextResponse.json(
+      { error: "missing_id", raw: json },
+      { status: 502 }
+    );
   } catch (e: unknown) {
     return NextResponse.json(
       { error: (e as Error)?.message ?? "Unknown" },

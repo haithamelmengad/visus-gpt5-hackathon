@@ -129,6 +129,10 @@ export async function POST(req: Request) {
       return "abstract music note, glossy midnight blue plastic, minimal";
     };
     const prompt = `${pick()} — single object, no scene, neutral lighting`;
+    
+    console.log(`[MESHY] No OpenAI API key, using fallback prompt for "${fullContext.core.title}":`);
+    console.log(`[MESHY] Fallback prompt: "${prompt}"`);
+    
     return NextResponse.json({ prompt });
   }
 
@@ -140,6 +144,10 @@ export async function POST(req: Request) {
       return v;
     };
     const model = normalizeModel(process.env.OPENAI_MODEL);
+    
+    console.log(`[MESHY] Generating prompt for track: ${fullContext.core.title} by ${fullContext.core.artist}`);
+    console.log(`[MESHY] Using model: ${model}`);
+    
     const completion = await openai.chat.completions.create({
       model,
       messages: [
@@ -148,7 +156,13 @@ export async function POST(req: Request) {
       ],
       response_format: { type: "text" } as any,
     });
+    
     const prompt = (completion.choices[0]?.message?.content || "").trim();
+    
+    console.log(`[MESHY] OpenAI response for "${fullContext.core.title}":`);
+    console.log(`[MESHY] Generated prompt: "${prompt}"`);
+    console.log(`[MESHY] Prompt length: ${prompt.length} characters`);
+    
     return NextResponse.json({ prompt });
   } catch (e: unknown) {
     const prompt = `abstract music note, glossy midnight blue plastic, minimal — single object, no scene, neutral lighting`;

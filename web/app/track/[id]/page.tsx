@@ -20,7 +20,7 @@ import { authOptions } from "@/lib/auth";
 export default async function TrackPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
   const session = await getServerSession(authOptions);
   if (
@@ -38,7 +38,7 @@ export default async function TrackPage({
     );
   }
 
-  const { id } = params;
+  const { id } = await params;
   const accessToken = (session as unknown as { accessToken: string })
     .accessToken;
   const track = await getTrack(id, accessToken);

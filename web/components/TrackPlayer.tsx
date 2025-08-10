@@ -23,118 +23,93 @@ export default function TrackPlayer({ title, artistNames, albumImageUrl, preview
   const [currentTimeSec, setCurrentTimeSec] = useState(0);
   const [durationSec, setDurationSec] = useState(0);
 
+  // Keep a persistent <audio> element and set its src when previewUrl changes
   useEffect(() => {
-    if (!previewUrl) return;
-    const audio = new Audio(previewUrl);
+    const audio = audioRef.current;
+    if (!audio) return;
+    // reset
+    try {
+      audio.pause();
+    } catch {}
+    if (!previewUrl) {
+      audio.removeAttribute("src");
+      setDurationSec(0);
+      setCurrentTimeSec(0);
+      return;
+    }
     audio.crossOrigin = "anonymous";
     audio.preload = "auto";
-    audio.volume = 1.0;
-    audioRef.current = audio;
-    // Setup Web Audio analyser for FFT/volume level
-    try {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      audioCtxRef.current = ctx;
-      const source = ctx.createMediaElementSource(audio);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.8;
-      source.connect(analyser);
-      analyser.connect(ctx.destination);
-      analyserRef.current = analyser;
-      dataRef.current = new Uint8Array(analyser.frequencyBinCount);
+    audio.src = previewUrl;
+    setAutoplayError(null);
+  }, [previewUrl]);
 
-      // Surface analyser to parent for advanced visualizers (FFT-based)
-      try {
-        onAnalyserReady?.(analyser);
-      } catch {}
-
-      const tick = () => {
-        const analyserNode = analyserRef.current;
-        const data = dataRef.current;
-        if (analyserNode && data) {
-          analyserNode.getByteTimeDomainData(data);
-          let sumSquares = 0;
-          for (let i = 0; i < data.length; i++) {
-            const v = (data[i] - 128) / 128; // -1..1
-            sumSquares += v * v;
-          }
-          const rms = Math.sqrt(sumSquares / data.length); // 0..1
-          onLevelChange?.(Math.min(1, Math.max(0, rms)));
-        }
-        rafRef.current = requestAnimationFrame(tick);
-      };
-      tick();
-
-      // Ensure AudioContext resumes once playback starts (user gesture)
-      const onPlay = async () => {
-        try {
-          if (audioCtxRef.current?.state === "suspended") {
-            await audioCtxRef.current.resume();
-          }
-        } catch {}
-        onPlayingChange?.(true);
-      };
-      audio.addEventListener("play", onPlay);
-      const onPause = () => onPlayingChange?.(false);
-      audio.addEventListener("pause", onPause);
-      audio.addEventListener("ended", onPause);
-
-      const onLoaded = () => setDurationSec(audio.duration || 0);
-      const onTime = () => setCurrentTimeSec(audio.currentTime || 0);
-      audio.addEventListener("loadedmetadata", onLoaded);
-      audio.addEventListener("timeupdate", onTime);
-
-      // Cleanup
-      return () => {
-        try {
-          audio.pause();
-          audio.src = "";
-        } catch {}
-        if (rafRef.current) cancelAnimationFrame(rafRef.current);
-        analyserRef.current?.disconnect();
-        audioCtxRef.current?.close().catch(() => {});
-        audio.removeEventListener("play", onPlay);
-        audio.removeEventListener("pause", onPause);
-        audio.removeEventListener("ended", onPause);
-        audio.removeEventListener("loadedmetadata", onLoaded);
-        audio.removeEventListener("timeupdate", onTime);
-        onPlayingChange?.(false);
-      };
-    } catch {}
-
-    // Try autoplay on mount after setting up context
-    audio.play().then(() => {
-      onPlayingChange?.(true);
-    }).catch(async (err) => {
-      setAutoplayError(err?.message || "Autoplay was blocked");
+  // Attach media event listeners once
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const onPlay = async () => {
       try {
         if (audioCtxRef.current?.state === "suspended") {
           await audioCtxRef.current.resume();
         }
       } catch {}
-    });
-
-    // Secondary cleanup if try block failed early
-    return () => {
-      try {
-        audio.pause();
-        audio.src = "";
-      } catch {}
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      analyserRef.current?.disconnect();
-      audioCtxRef.current?.close().catch(() => {});
+      onPlayingChange?.(true);
     };
-  }, [previewUrl]);
+    const onPause = () => onPlayingChange?.(false);
+    const onLoaded = () => setDurationSec(audio.duration || 0);
+    const onTime = () => setCurrentTimeSec(audio.currentTime || 0);
+    audio.addEventListener("play", onPlay);
+    audio.addEventListener("pause", onPause);
+    audio.addEventListener("ended", onPause);
+    audio.addEventListener("loadedmetadata", onLoaded);
+    audio.addEventListener("timeupdate", onTime);
+    return () => {
+      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("ended", onPause);
+      audio.removeEventListener("loadedmetadata", onLoaded);
+      audio.removeEventListener("timeupdate", onTime);
+    };
+  }, [onPlayingChange]);
 
   const handleManualPlay = async () => {
-    if (!audioRef.current && previewUrl) {
-      audioRef.current = new Audio(previewUrl);
-    }
+    const audio = audioRef.current;
+    if (!audio || !previewUrl) return;
     try {
-      if (audioCtxRef.current?.state === "suspended") {
+      // Lazily create AudioContext and analyser on first play to satisfy policies
+      if (!audioCtxRef.current) {
+        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        audioCtxRef.current = ctx;
+        const source = ctx.createMediaElementSource(audio);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.8;
+        source.connect(analyser);
+        analyser.connect(ctx.destination);
+        analyserRef.current = analyser;
+        dataRef.current = new Uint8Array(analyser.frequencyBinCount);
+        // Expose analyser
+        try { onAnalyserReady?.(analyser); } catch {}
+        // Start RMS loop
+        const tick = () => {
+          const analyserNode = analyserRef.current;
+          const data = dataRef.current;
+          if (analyserNode && data) {
+            analyserNode.getByteFrequencyData(data);
+            // Simple energy: average of bins
+            let sum = 0;
+            for (let i = 0; i < data.length; i++) sum += data[i];
+            const avg = sum / (data.length * 255);
+            onLevelChange?.(Math.min(1, Math.max(0, avg)));
+          }
+          rafRef.current = requestAnimationFrame(tick);
+        };
+        tick();
+      }
+      if (audioCtxRef.current.state === "suspended") {
         await audioCtxRef.current.resume();
       }
-      await audioRef.current?.play();
+      await audio.play();
       setAutoplayError(null);
       onPlayingChange?.(true);
     } catch (e: any) {
@@ -194,6 +169,8 @@ export default function TrackPlayer({ title, artistNames, albumImageUrl, preview
 
   return (
     <div>
+      {/* Hidden native audio element for robust playback */}
+      <audio ref={audioRef} playsInline />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {albumImageUrl && (

@@ -13,6 +13,7 @@ const inputSchema = z.object({
   artist: z.string().optional(),
   spotifyMeta: z.record(z.any()).optional(),
   includeAnalysis: z.boolean().optional(),
+  skipEnrichment: z.boolean().optional(),
 });
 
 // A structured recipe that instructs the frontend how to build a model and shader
@@ -32,6 +33,7 @@ export async function POST(req: Request) {
     artist: legacyArtist,
     spotifyMeta: legacyMeta,
     includeAnalysis,
+    skipEnrichment,
   } = parsed.data;
 
   // Try to enrich with Spotify server-side using user session
@@ -56,7 +58,7 @@ export async function POST(req: Request) {
   let artistsDetailed: Array<Record<string, unknown>> = [];
   let albumDetailed: Record<string, unknown> | null = null;
 
-  if (accessToken) {
+  if (accessToken && !skipEnrichment) {
     try {
       // Fetch core Spotify data in parallel
       const trackUrl = `https://api.spotify.com/v1/tracks/${encodeURIComponent(
@@ -197,7 +199,8 @@ export async function POST(req: Request) {
 
   const researchHint = `Use the provided Spotify data. If your tools allow, briefly research the song/artist on the web (official artwork, themes, lyrics, notable motifs) and reflect that in concept and color palette. Keep output strictly as JSON.`;
 
-  const user = `Input Spotify context (JSON):\n${JSON.stringify(
+  const fastUser = `Title: ${fullContext.core.title}\nArtist: ${fullContext.core.artist}\n\n${schemaHint}\n\nTask: Produce a compact JSON recipe for a 3D visualizer. Choose one baseGeometry or a supported custom metaphor. Keep it minimal and feasible with one vertex deformation. Provide 3-5 hex colors, and an audioMapping with fftBands and some spotifyWeights (best guess).`;
+  const richUser = `Input Spotify context (JSON):\n${JSON.stringify(
     fullContext,
     null,
     2
@@ -232,20 +235,44 @@ export async function POST(req: Request) {
     if (v === "gpt5" || v === "gpt 5") return "gpt-5";
     return v;
   };
-  const model = normalizeModel(process.env.OPENAI_MODEL);
+  let model = normalizeModel(process.env.OPENAI_MODEL);
+  if (skipEnrichment) {
+    // Prefer a faster model when low-latency is desired
+    const fastEnv = (process.env.OPENAI_FAST_MODEL || "").trim();
+    if (fastEnv) model = normalizeModel(fastEnv);
+    // If no fast model is provided, keep the default model
+  }
 
   const jsonFormat = { type: "json_object" } as const;
   try {
-    const completion = await openai.chat.completions.create({
+    const messages = [
+      { role: "system", content: system },
+      { role: "user", content: skipEnrichment ? fastUser : richUser },
+    ] as const;
+
+    // Apply a short timeout for fast path; on timeout, fall back to a local recipe
+    const timeoutMs = skipEnrichment
+      ? parseInt(process.env.OPENAI_FAST_TIMEOUT_MS || "8000", 10)
+      : 0;
+
+    const completionPromise = openai.chat.completions.create({
       model,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
+      messages: messages as any,
       response_format: jsonFormat as unknown as { type: "json_object" },
+      max_tokens: 450,
+      temperature: 0.4,
     });
 
-    const content = completion.choices[0]?.message?.content || "{}";
+    const completionAny: any = timeoutMs > 0
+      ? await Promise.race([
+          completionPromise,
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("openai_timeout")), timeoutMs)
+          ),
+        ])
+      : await completionPromise;
+
+    const content = completionAny.choices[0]?.message?.content || "{}";
 
     let recipe: VisualizerRecipe | null = null;
     try {

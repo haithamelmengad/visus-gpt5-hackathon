@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import TrackPlayer from "@/components/TrackPlayer";
 import type { VisualizerRecipe } from "@/types/visualizer";
@@ -41,10 +40,18 @@ export default function TrackVisualClient(props: Props) {
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const meshRef = useRef<THREE.Mesh | null>(null);
+  // No fallback primitive; we show loading until the Meshy model is ready
   const materialRef = useRef<THREE.ShaderMaterial | null>(null);
   const frameRef = useRef<number | null>(null);
   const gltfLoaderRef = useRef<GLTFLoader | null>(null);
+  const currentObjectRef = useRef<THREE.Object3D | null>(null);
+  const [modelReady, setModelReady] = useState(false);
+  const baseScaleRef = useRef<number>(1);
+  const isPlayingRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
 
   // Fetch full recipe
   useEffect(() => {
@@ -56,7 +63,13 @@ export default function TrackVisualClient(props: Props) {
         const r = await fetch(`/api/visualizer/recipe`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ spotifyId: id, includeAnalysis: false }),
+          body: JSON.stringify({
+            spotifyId: id,
+            title: props.title,
+            artist: props.artistNames,
+            includeAnalysis: false,
+            skipEnrichment: true,
+          }),
         });
         if (!r.ok) throw new Error(await r.text());
         const data = (await r.json()) as VisualizerRecipe;
@@ -72,29 +85,29 @@ export default function TrackVisualClient(props: Props) {
     };
   }, [props.spotifyId]);
 
-  // Fetch Spotify audio features used by recipe weights
-  useEffect(() => {
-    const id = props.spotifyId;
-    if (!id) return;
-    let aborted = false;
-    const run = async () => {
-      try {
-        const r = await fetch(`/api/spotify/features/${id}`, {
-          cache: "no-store",
-        });
-        if (!r.ok) throw new Error(await r.text());
-        const data = (await r.json()) as SpotifyFeatures;
-        if (!aborted) setFeatures(data);
-      } catch (e) {
-        // Non-fatal; the visualizer will still run driven by FFT
-        if (!aborted) setFeatures(null);
-      }
-    };
-    run();
-    return () => {
-      aborted = true;
-    };
-  }, [props.spotifyId]);
+  // // Fetch Spotify audio features used by recipe weights
+  // useEffect(() => {
+  //   const id = props.spotifyId;
+  //   if (!id) return;
+  //   let aborted = false;
+  //   const run = async () => {
+  //     try {
+  //       const r = await fetch(`/api/spotify/features/${id}`, {
+  //         cache: "no-store",
+  //       });
+  //       if (!r.ok) throw new Error(await r.text());
+  //       const data = (await r.json()) as SpotifyFeatures;
+  //       if (!aborted) setFeatures(data);
+  //     } catch (e) {
+  //       // Non-fatal; the visualizer will still run driven by FFT
+  //       if (!aborted) setFeatures(null);
+  //     }
+  //   };
+  //   run();
+  //   return () => {
+  //     aborted = true;
+  //   };
+  // }, [props.spotifyId]);
 
   // Compute a simple scalar from Spotify features using recipe-provided weights
   const spotifyScalar = useMemo(() => {
@@ -182,209 +195,7 @@ export default function TrackVisualClient(props: Props) {
     scene.add(new THREE.AmbientLight(0xffffff, 0.5));
     scene.add(dirLight);
 
-    // geometry from recipe (supports custom metaphor shapes)
-    const p = recipe.baseParams || {};
-    let geometry: THREE.BufferGeometry;
-    const makeCustomGeometry = (kind?: string): THREE.BufferGeometry | null => {
-      if (!kind) return null;
-      switch (kind) {
-        case "sunglasses": {
-          // Minimal stylized sunglasses: two torus-rims + small bridge + simple bars
-          const group = new THREE.Group();
-          const rimR = (p as any).rimRadius ?? 0.6;
-          const rimT = (p as any).rimTube ?? 0.08;
-          const bridge = (p as any).bridge ?? 0.25;
-          const eyeGap = (p as any).eyeGap ?? 0.2;
-          const geoL = new THREE.TorusGeometry(rimR, rimT, 24, 72);
-          const geoR = new THREE.TorusGeometry(rimR, rimT, 24, 72);
-          const mat = new THREE.MeshBasicMaterial();
-          const meshL = new THREE.Mesh(geoL, mat);
-          const meshR = new THREE.Mesh(geoR, mat);
-          meshL.position.x = -(rimR + eyeGap / 2);
-          meshR.position.x = +(rimR + eyeGap / 2);
-          group.add(meshL, meshR);
-          const bridgeGeo = new THREE.CylinderGeometry(
-            rimT * 0.9,
-            rimT * 0.9,
-            bridge,
-            12,
-            1
-          );
-          const bridgeMesh = new THREE.Mesh(bridgeGeo, mat);
-          bridgeMesh.rotation.z = Math.PI / 2;
-          group.add(bridgeMesh);
-          // Flatten into single BufferGeometry
-          const merged = mergeGeometries(
-            [
-              geoL.toNonIndexed(),
-              geoR.toNonIndexed(),
-              bridgeGeo.toNonIndexed(),
-            ],
-            true
-          ) as THREE.BufferGeometry | null;
-          if (merged) {
-            merged.computeVertexNormals();
-            return merged;
-          }
-          // Fallback: approximate with a wide torus
-          return new THREE.TorusGeometry(rimR * 1.9 + eyeGap, rimT, 24, 96);
-        }
-        case "lightbulb": {
-          // Bulb: sphere top + small cylinder base
-          const bulbR = (p as any).radius ?? 0.9;
-          const neckH = (p as any).neckHeight ?? 0.35;
-          const neckR = (p as any).neckRadius ?? 0.35;
-          const sphere = new THREE.SphereGeometry(bulbR, 192, 192);
-          // Clip lower hemisphere for bulb look by translating up and relying on displacement
-          sphere.translate(0, neckH * 0.2, 0);
-          const cyl = new THREE.CylinderGeometry(
-            neckR,
-            neckR * 1.05,
-            neckH,
-            64,
-            1
-          );
-          cyl.translate(0, -bulbR * 0.8, 0);
-          const merged = mergeGeometries(
-            [sphere.toNonIndexed(), cyl.toNonIndexed()],
-            true
-          ) as THREE.BufferGeometry | null;
-          if (merged) {
-            merged.computeVertexNormals();
-            return merged;
-          }
-          return sphere;
-        }
-        case "vinyl": {
-          const outer = (p as any).radius ?? 1.2;
-          const inner = (p as any).innerRadius ?? 0.15;
-          return new THREE.RingGeometry(inner, outer, 256, 1);
-        }
-        case "heart": {
-          // Parametric 3D heart via lathe profile
-          const points: THREE.Vector2[] = [];
-          for (let t = 0; t <= Math.PI; t += Math.PI / 80) {
-            const x = 0.8 * Math.pow(Math.sin(t), 3);
-            const y =
-              0.6 * Math.cos(t) -
-              0.3 * Math.cos(2 * t) -
-              0.05 * Math.cos(3 * t) -
-              0.2;
-            points.push(new THREE.Vector2(Math.abs(x), y));
-          }
-          const g = new THREE.LatheGeometry(points, 160);
-          g.computeVertexNormals();
-          return g;
-        }
-        case "star": {
-          const r1 = (p as any).radius ?? 1.1;
-          const r2 = r1 * 0.5;
-          const spikes = (p as any).spikes ?? 5;
-          const shape = new THREE.Shape();
-          for (let i = 0; i < spikes * 2; i++) {
-            const r = i % 2 === 0 ? r1 : r2;
-            const a = (i / (spikes * 2)) * Math.PI * 2;
-            const x = Math.cos(a) * r;
-            const y = Math.sin(a) * r;
-            if (i === 0) shape.moveTo(x, y);
-            else shape.lineTo(x, y);
-          }
-          shape.closePath();
-          const g = new THREE.ExtrudeGeometry(shape, {
-            depth: 0.3,
-            bevelEnabled: true,
-            bevelSize: 0.05,
-            bevelSegments: 2,
-          });
-          g.computeVertexNormals();
-          return g;
-        }
-        case "bolt": {
-          // Simple lightning bolt silhouette extruded
-          const s = new THREE.Shape();
-          s.moveTo(-0.2, 0.7);
-          s.lineTo(0.1, 0.1);
-          s.lineTo(-0.05, 0.1);
-          s.lineTo(0.2, -0.7);
-          s.lineTo(-0.1, -0.1);
-          s.lineTo(0.05, -0.1);
-          s.lineTo(-0.2, 0.7);
-          const g = new THREE.ExtrudeGeometry(s, {
-            depth: 0.25,
-            bevelEnabled: false,
-          });
-          g.computeVertexNormals();
-          return g;
-        }
-        case "music_note": {
-          const r = (p as any).noteRadius ?? 0.25;
-          const staff = (p as any).staffHeight ?? 1.2;
-          const cyl = new THREE.CylinderGeometry(0.06, 0.06, staff, 12, 1);
-          cyl.translate(0.35, 0.2, 0);
-          const head = new THREE.SphereGeometry(r, 64, 64);
-          head.translate(0, -staff * 0.45, 0);
-          const merged = mergeGeometries(
-            [cyl.toNonIndexed(), head.toNonIndexed()],
-            true
-          ) as THREE.BufferGeometry | null;
-          if (merged) {
-            merged.computeVertexNormals();
-            return merged;
-          }
-          return head;
-        }
-        default:
-          return null;
-      }
-    };
-
-    switch (recipe.baseGeometry) {
-      case "box":
-        geometry = new THREE.BoxGeometry(
-          (p as any).width ?? 1.2,
-          (p as any).height ?? 1.2,
-          (p as any).depth ?? 1.2,
-          64,
-          64,
-          64
-        );
-        break;
-      case "plane":
-        geometry = new THREE.PlaneGeometry(
-          (p as any).width ?? 2.5,
-          (p as any).height ?? 2.5,
-          256,
-          256
-        );
-        break;
-      case "torus":
-        geometry = new THREE.TorusGeometry(
-          (p as any).radius ?? 0.9,
-          (p as any).tube ?? 0.35,
-          256,
-          128
-        );
-        break;
-      case "cylinder":
-        geometry = new THREE.CylinderGeometry(
-          (p as any).radiusTop ?? 0.8,
-          (p as any).radiusBottom ?? 0.8,
-          (p as any).height ?? 1.6,
-          128,
-          32
-        );
-        break;
-      case "custom": {
-        const g = makeCustomGeometry((recipe as any).customKind);
-        geometry =
-          g ?? new THREE.SphereGeometry((p as any).radius ?? 1.1, 256, 256);
-        break;
-      }
-      case "sphere":
-      default:
-        geometry = new THREE.SphereGeometry((p as any).radius ?? 1.1, 256, 256);
-        break;
-    }
+    // No fallback primitive geometry; we wait for Meshy model
 
     // material (simple displacement shader driven by amplitude)
     const pickPrimary = (palette?: string[]): string => {
@@ -464,8 +275,7 @@ export default function TrackVisualClient(props: Props) {
       lights: false,
     });
 
-    const mesh = new THREE.Mesh(geometry, material);
-    scene.add(mesh);
+    // Defer adding any geometry until Meshy model is ready
 
     // If GPT selected a custom metaphor, try to replace the fallback primitive with a Meshy-generated model
     const tryLoadMeshyModel = async () => {
@@ -477,6 +287,8 @@ export default function TrackVisualClient(props: Props) {
           "false";
         if (!enable) return;
 
+        console.log(`[CLIENT] Requesting Meshy prompt for track ID: ${props.spotifyId}`);
+
         const promptRes = await fetch(`/api/visualizer/meshy`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -485,28 +297,74 @@ export default function TrackVisualClient(props: Props) {
             includeAnalysis: false,
           }),
         });
+        
         if (!promptRes.ok) {
+          console.log(`[CLIENT] Meshy prompt error: ${promptRes.status}`);
           setMeshyStatus(`meshy prompt error: ${promptRes.status}`);
           return;
         }
+        
         const { prompt } = (await promptRes.json()) as { prompt?: string };
+        console.log(`[CLIENT] Received Meshy prompt: "${prompt}"`);
+        
         if (!prompt) return;
 
+        console.log(`[CLIENT] Starting Meshy 3D generation with prompt: "${prompt}"`);
+        
         const startRes = await fetch(`/api/visualizer/meshy/start`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt }),
         });
+        
         if (!startRes.ok) {
           const txt = await startRes.text();
+          console.log(`[CLIENT] Meshy start error: ${startRes.status} - ${txt}`);
           setMeshyStatus(`meshy start error: ${startRes.status}`);
           console.warn("meshy start error", txt);
           return;
         }
+        
         const startJson = (await startRes.json()) as { id?: string };
+        console.log(`[CLIENT] Meshy generation started with ID: ${startJson.id}`);
+        
         if (!startJson.id) return;
 
         let modelUrl: string | null = null;
+        const pickModelUrl = (j: any): string | null => {
+          if (typeof j?.model_url === "string") return j.model_url as string;
+          if (typeof j?.modelUrl === "string") return j.modelUrl as string;
+          const tryModelUrls = (obj: any): string | null => {
+            if (!obj || typeof obj !== "object") return null;
+            const glb = (obj as any).glb ?? (obj as any).GLB;
+            const gltf = (obj as any).gltf ?? (obj as any).GLTF;
+            if (typeof glb === "string") return glb;
+            if (typeof gltf === "string") return gltf;
+            return null;
+          };
+          const direct = tryModelUrls(j.model_urls) || tryModelUrls(j.modelUrls);
+          if (direct) return direct;
+          const fromAssets = (arr: any[]): string | null => {
+            for (const a of arr) {
+              const url = typeof a?.url === "string" ? (a.url as string) : null;
+              const format = (a?.format ?? a?.type ?? a?.mimeType ?? "").toString().toLowerCase();
+              if (url && (url.endsWith(".glb") || url.endsWith(".gltf"))) return url;
+              if (url && (format.includes("glb") || format.includes("gltf"))) return url;
+            }
+            // fallback: first url string
+            const anyUrl = arr.find((a) => typeof a?.url === "string");
+            return anyUrl?.url ?? null;
+          };
+          if (Array.isArray((j as any).assets)) {
+            const u = fromAssets((j as any).assets);
+            if (u) return u;
+          }
+          if (Array.isArray((j as any).files)) {
+            const u = fromAssets((j as any).files);
+            if (u) return u;
+          }
+          return null;
+        };
         for (let i = 0; i < 40; i++) {
           await new Promise((r) => setTimeout(r, 3000));
           const s = await fetch(
@@ -516,32 +374,24 @@ export default function TrackVisualClient(props: Props) {
             { cache: "no-store" }
           );
           if (!s.ok) continue;
-          const j = (await s.json()) as {
-            status?: string;
-            model_url?: string;
-            assets?: Array<{ url?: string }>;
-          };
+          const j = (await s.json()) as any;
           setMeshyStatus(`meshy status: ${j.status ?? "pending"}`);
-          if (j.model_url) {
-            modelUrl = j.model_url;
+          const picked = pickModelUrl(j);
+          if (picked) {
+            modelUrl = picked;
+            console.log(`[CLIENT] Meshy model URL selected: ${modelUrl}`);
             break;
-          }
-          if (Array.isArray((j as any).assets)) {
-            const a = (j as any).assets.find(
-              (x: any) => typeof x?.url === "string"
-            );
-            if (a?.url) {
-              modelUrl = a.url as string;
-              break;
-            }
           }
           if (j.status && /failed|canceled/i.test(j.status)) break;
         }
         if (!modelUrl) return;
 
         if (!gltfLoaderRef.current) gltfLoaderRef.current = new GLTFLoader();
+        const proxiedUrl = `/api/visualizer/meshy/fetch?url=${encodeURIComponent(
+          modelUrl!
+        )}`;
         const gltf = await new Promise<any>((resolve, reject) => {
-          gltfLoaderRef.current!.load(modelUrl!, resolve, undefined, reject);
+          gltfLoaderRef.current!.load(proxiedUrl, resolve, undefined, reject);
         });
         const root: THREE.Group = gltf.scene || gltf.scenes?.[0];
         if (!root) return;
@@ -552,8 +402,12 @@ export default function TrackVisualClient(props: Props) {
         box.getSize(size);
         box.getCenter(center);
         root.position.sub(center);
-        const scalar = 2.0 / Math.max(1e-3, Math.max(size.x, size.y, size.z));
+        // Scale to a comfortable on-screen size (smaller than before)
+        const desiredMaxSize = 1.6; // target dimension in world units
+        const currentMaxSize = Math.max(1e-3, Math.max(size.x, size.y, size.z));
+        const scalar = desiredMaxSize / currentMaxSize;
         root.scale.multiplyScalar(scalar);
+        baseScaleRef.current = root.scale.x;
         // Apply our shader to every mesh so displacement still works
         root.traverse((obj) => {
           const m = obj as any;
@@ -562,11 +416,11 @@ export default function TrackVisualClient(props: Props) {
             m.geometry.computeVertexNormals?.();
           }
         });
-        // Swap the primitive with the GLTF root
+        // Add the GLTF root to the scene
         scene.add(root);
-        scene.remove(mesh);
-        mesh.geometry.dispose();
+        currentObjectRef.current = root;
         setMeshyStatus(null);
+        setModelReady(true);
       } catch {
         // ignore and keep fallback primitive
         setMeshyStatus((prev) => prev ?? "meshy failed — using fallback");
@@ -591,8 +445,10 @@ export default function TrackVisualClient(props: Props) {
       if (!isPointerDown) return;
       const dx = (e.clientX - lastX) * 0.005;
       const dy = (e.clientY - lastY) * 0.005;
-      mesh.rotation.y += dx;
-      mesh.rotation.x += dy;
+      const obj = currentObjectRef.current;
+      if (!obj) return;
+      obj.rotation.y += dx;
+      obj.rotation.x += dy;
       lastX = e.clientX;
       lastY = e.clientY;
     };
@@ -615,9 +471,7 @@ export default function TrackVisualClient(props: Props) {
       uniforms.u_time.value = t * 0.001;
       if (analyser && fftArray && recipe) {
         try {
-          analyser.getByteFrequencyData(
-            fftArray as unknown as Uint8Array<ArrayBuffer>
-          );
+          analyser.getByteFrequencyData(fftArray as Uint8Array);
         } catch {}
         const lowIdx = recipe.audioMapping?.fftBands?.low ?? 2;
         const midIdx = recipe.audioMapping?.fftBands?.mid ?? 24;
@@ -627,9 +481,25 @@ export default function TrackVisualClient(props: Props) {
         const high = (fftArray as Uint8Array)[highIdx] ?? 0;
         const energy = (low + mid + high) / (3 * 255);
         const baseAmp = (recipe.deformation as any)?.amplitude ?? 0.3;
-        uniforms.u_amplitude.value =
-          baseAmp * (0.55 * energy + 0.45 * spotifyScalar);
-        mesh.rotation.y += 0.002 + 0.01 * energy;
+        const combined = 0.55 * energy + 0.45 * spotifyScalar;
+        uniforms.u_amplitude.value = baseAmp * combined;
+
+        const obj = currentObjectRef.current;
+        if (obj) {
+          // Rotate only while audio is playing
+          if (isPlayingRef.current) {
+            const rotSpeed = 0.004 + 0.018 * energy;
+            obj.rotation.y += rotSpeed;
+            obj.rotation.x += 0.002 * (low / 255);
+          }
+
+          // Audio-reactive uniform scale around the original fitted scale
+          const scalePulse = 1 + 0.25 * energy; // 0–25% growth
+          const target = baseScaleRef.current * scalePulse;
+          // Smooth a bit to avoid jitter
+          const lerp = THREE.MathUtils.lerp(obj.scale.x, target, 0.25);
+          obj.scale.setScalar(lerp);
+        }
       }
       renderer.render(scene, camera);
       frameRef.current = requestAnimationFrame(tick);
@@ -640,7 +510,6 @@ export default function TrackVisualClient(props: Props) {
     sceneRef.current = scene;
     cameraRef.current = camera;
     rendererRef.current = renderer;
-    meshRef.current = mesh;
     materialRef.current = material;
 
     onResize();
@@ -651,7 +520,6 @@ export default function TrackVisualClient(props: Props) {
       container.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("pointermove", onPointerMove);
-      geometry.dispose();
       material.dispose();
       renderer.dispose();
     };
@@ -671,31 +539,42 @@ export default function TrackVisualClient(props: Props) {
     );
   }
 
-  if (!recipe) {
+  if (!modelReady) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
+      <div style={{ display: "flex", flexDirection: "column", height: "100vh", minHeight: 0 }}>
         {/* 3D Visualizer Area - Top */}
         <div
           ref={containerRef}
           style={{
             flex: 1,
             width: "100%",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "radial-gradient(60% 60% at 50% 20%, rgba(80,38,125,0.45) 0%, rgba(18,12,24,0.85) 48%, #07070a 100%)",
             position: "relative",
+            background: "radial-gradient(60% 60% at 50% 20%, rgba(80,38,125,0.45) 0%, rgba(18,12,24,0.85) 48%, #07070a 100%)",
+            overflow: "hidden",
           }}
         >
-          <div style={{ 
-            color: "#9aa0a6", 
-            textAlign: "center",
-            padding: "24px",
-            background: "rgba(14,14,18,0.5)",
-            borderRadius: "12px",
-            border: "1px solid rgba(255,255,255,0.08)"
-          }}>
-            Loading visualizer...
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              pointerEvents: "none",
+            }}
+          >
+            <div
+              style={{
+                color: "#9aa0a6",
+                textAlign: "center",
+                padding: "14px 18px",
+                background: "rgba(14,14,18,0.5)",
+                borderRadius: "12px",
+                border: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              Loading visualizer...
+            </div>
           </div>
         </div>
         
@@ -720,7 +599,7 @@ export default function TrackVisualClient(props: Props) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
+      <div style={{ display: "flex", flexDirection: "column", height: "100vh", minHeight: 0 }}>
       {/* 3D Visualizer Area - Top */}
       <div
         ref={containerRef}
@@ -731,12 +610,14 @@ export default function TrackVisualClient(props: Props) {
           background: "radial-gradient(60% 60% at 50% 20%, rgba(80,38,125,0.45) 0%, rgba(18,12,24,0.85) 48%, #07070a 100%)",
         }}
       >
-        <canvas 
-          ref={canvasRef} 
+        <canvas
+          ref={canvasRef}
           style={{
+            position: "absolute",
+            inset: 0,
             width: "100%",
             height: "100%",
-            display: "block"
+            display: "block",
           }}
         />
       </div>

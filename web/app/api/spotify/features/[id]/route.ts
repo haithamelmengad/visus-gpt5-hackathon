@@ -10,7 +10,7 @@ export async function GET(_request: Request, { params }: any) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const id = params.id;
+  const id = (await params).id;
   if (!id) {
     return NextResponse.json({ error: "Missing track id" }, { status: 400 });
   }
