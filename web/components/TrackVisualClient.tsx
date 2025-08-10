@@ -445,8 +445,8 @@ export default function TrackVisualClient(props: Props) {
         box.getSize(size);
         box.getCenter(center);
         root.position.sub(center);
-        // Scale to a comfortable on-screen size (smaller than before)
-        const desiredMaxSize = 1.6; // target dimension in world units
+        // Scale to a comfortable on-screen size (larger overall)
+        const desiredMaxSize = 2.6; // target dimension in world units
         const currentMaxSize = Math.max(1e-3, Math.max(size.x, size.y, size.z));
         const scalar = desiredMaxSize / currentMaxSize;
         root.scale.multiplyScalar(scalar);
