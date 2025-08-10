@@ -206,20 +206,20 @@ export default function TrackPlayer({ title, artistNames, albumImageUrl, preview
                   width: 34,
                   height: 34,
                   borderRadius: 18,
-                  color: "#1DB954",
-                  background: "rgba(29,185,84,0.08)",
-                  border: "1px solid rgba(29,185,84,0.35)",
+                  background: "#1DB954",
                 }}
               >
                 <svg
-                  width="20"
-                  height="20"
+                  width="32"
+                  height="32"
                   viewBox="0 0 24 24"
-                  fill="currentColor"
                   xmlns="http://www.w3.org/2000/svg"
                   aria-hidden="true"
                 >
-                  <path d="M12 0C5.371 0 0 5.371 0 12s5.371 12 12 12 12-5.371 12-12S18.629 0 12 0zm5.486 17.32a.9.9 0 0 1-1.239.297c-3.395-2.073-7.676-2.544-12.722-1.403a.9.9 0 1 1-.388-1.759c5.45-1.204 10.116-.667 13.822 1.491.43.262.567.823.327 1.374zm1.655-3.33a1.13 1.13 0 0 1-1.556.373c-3.883-2.382-9.806-3.074-14.398-1.694a1.13 1.13 0 1 1-.642-2.168c5.225-1.55 11.704-.775 16.097 1.929.523.32.688 1.006.5 1.56zm.156-3.502c-4.64-2.754-12.307-3.005-16.723-1.673a1.35 1.35 0 1 1-.767-2.59c5.036-1.49 13.576-1.208 18.88 1.898a1.35 1.35 0 0 1-1.39 2.365z" />
+                  <circle cx="12" cy="12" r="10" fill="#1DB954" />
+                  <path d="M7.9 8.9c3.4-0.9 7.2-0.6 10.2 1" stroke="#0f1115" strokeWidth="1.6" strokeLinecap="round" fill="none" />
+                  <path d="M8.3 11.4c2.9-0.6 5.7-0.3 8.1 0.8" stroke="#0f1115" strokeWidth="1.6" strokeLinecap="round" fill="none" />
+                  <path d="M8.8 13.8c2.1-0.3 4-0.1 5.7 0.6" stroke="#0f1115" strokeWidth="1.6" strokeLinecap="round" fill="none" />
                 </svg>
               </a>
             </div>
